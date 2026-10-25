@@ -5,7 +5,7 @@
     "site": "https://getcadcraft.com",
     "notice": "ModelCraft — browser edition\nCopyright 2026 The Data Design Group, Inc.\n\nThis product is licensed under the Apache License, Version 2.0 (see LICENSE).\nIt uses third-party software under their own permissive licenses: see THIRD_PARTY.md and the LICENSE and\nSOURCE.txt files in each folder under assets/vendor/.\n\nCadCraft and the names of the apps in the CadCraft family are trademarks of The Data Design Group, Inc.\nThe Apache License does not grant permission to use them (section 6); a fork must use another name.\n",
     "privacy": "Your files stay on your computer: nothing is uploaded, and the app never contacts getcadcraft.com.",
-    "trademarkNotice": "CadCraft and the CadCraft logo are trademarks of The Data Design Group, Inc. AutoCAD, Revit and Civil 3D are registered trademarks of Autodesk, Inc. SketchUp and Tekla are trademarks of Trimble Inc. Bluebeam is a trademark of Bluebeam, Inc. PlanSwift is a trademark of ConstructConnect. SolidWorks is a registered trademark of Dassault Systèmes. All other company and product names, logos and brands are the property of their respective owners and are used only to identify their products. CadCraft is independent and not affiliated with, sponsored by or endorsed by any of them.",
+    "trademarkNotice": "CadCraft and the CadCraft logo are trademarks of The Data Design Group, Inc. AutoCAD, Revit, Civil 3D and Fusion are registered trademarks of Autodesk, Inc. SketchUp and Tekla are trademarks of Trimble Inc. Bluebeam is a trademark of Bluebeam, Inc. PlanSwift is a trademark of ConstructConnect. SolidWorks is a registered trademark of Dassault Systèmes. All other company and product names, logos and brands are the property of their respective owners and are used only to identify their products. CadCraft is independent and not affiliated with, sponsored by or endorsed by any of them.",
     "shell": {
         "bootstrap": {
             "from": "assets/js/bootstrap",
@@ -50,10 +50,20 @@
         }
     },
     "known": {
+        "draco": {
+            "name": "Draco (glTF decoder)",
+            "spdx": "Apache-2.0",
+            "url": "https://github.com/google/draco"
+        },
         "manifold-3d": {
             "name": "Manifold",
             "spdx": "Apache-2.0",
             "url": "https://github.com/elalish/manifold"
+        },
+        "meshoptimizer": {
+            "name": "meshoptimizer (decoder)",
+            "spdx": "MIT",
+            "url": "https://github.com/zeux/meshoptimizer"
         },
         "noble-ciphers": {
             "name": "noble-ciphers",
@@ -70,6 +80,12 @@
             "spdx": "MIT",
             "url": "https://github.com/paulmillr/noble-hashes"
         },
+        "oidn-weights": {
+            "name": "Intel Open Image Denoise weights",
+            "spdx": "Apache-2.0",
+            "url": "https://github.com/RenderKit/oidn-weights",
+            "note": "Trained network weights only (rt_hdr_alb_nrm_small.tza, unmodified, with LICENSE.txt and SOURCE.txt); CadCraft's own inference in render/pt-denoise*.js (0.7 RN.5, docs/spikes/RN.5-denoiser.md)."
+        },
         "three": {
             "name": "three.js",
             "spdx": "MIT",
@@ -85,6 +101,12 @@
             "name": "three-mesh-bvh",
             "spdx": "MIT",
             "url": "https://github.com/gkjohnson/three-mesh-bvh"
+        },
+        "three-webgpu": {
+            "name": "three.js (WebGPU build)",
+            "spdx": "MIT",
+            "url": "https://github.com/mrdoob/three.js",
+            "note": "The same three.js release, its WebGPU build and the addons the real-time view uses; its three.core.js is a one-line re-export of the three folder's core (CadCraft's, Apache-2.0)."
         }
     },
     "embedded": {
@@ -106,5 +128,11 @@
         "LicenseRef-NIST AND BSD-3-Clause",
         "0BSD AND PSF-2.0"
     ],
-    "extra": {}
+    "extra": {
+        "meshoptimizer": {
+            "1.3.0": {
+                "LICENSE.md": "TUlUIExpY2Vuc2UKCkNvcHlyaWdodCAoYykgMjAxNi0yMDI2IEFyc2VueSBLYXBvdWxraW5lCgpQZXJtaXNzaW9uIGlzIGhlcmVieSBncmFudGVkLCBmcmVlIG9mIGNoYXJnZSwgdG8gYW55IHBlcnNvbiBvYnRhaW5pbmcgYSBjb3B5Cm9mIHRoaXMgc29mdHdhcmUgYW5kIGFzc29jaWF0ZWQgZG9jdW1lbnRhdGlvbiBmaWxlcyAodGhlICJTb2Z0d2FyZSIpLCB0byBkZWFsCmluIHRoZSBTb2Z0d2FyZSB3aXRob3V0IHJlc3RyaWN0aW9uLCBpbmNsdWRpbmcgd2l0aG91dCBsaW1pdGF0aW9uIHRoZSByaWdodHMKdG8gdXNlLCBjb3B5LCBtb2RpZnksIG1lcmdlLCBwdWJsaXNoLCBkaXN0cmlidXRlLCBzdWJsaWNlbnNlLCBhbmQvb3Igc2VsbApjb3BpZXMgb2YgdGhlIFNvZnR3YXJlLCBhbmQgdG8gcGVybWl0IHBlcnNvbnMgdG8gd2hvbSB0aGUgU29mdHdhcmUgaXMKZnVybmlzaGVkIHRvIGRvIHNvLCBzdWJqZWN0IHRvIHRoZSBmb2xsb3dpbmcgY29uZGl0aW9uczoKClRoZSBhYm92ZSBjb3B5cmlnaHQgbm90aWNlIGFuZCB0aGlzIHBlcm1pc3Npb24gbm90aWNlIHNoYWxsIGJlIGluY2x1ZGVkIGluIGFsbApjb3BpZXMgb3Igc3Vic3RhbnRpYWwgcG9ydGlvbnMgb2YgdGhlIFNvZnR3YXJlLgoKVEhFIFNPRlRXQVJFIElTIFBST1ZJREVEICJBUyBJUyIsIFdJVEhPVVQgV0FSUkFOVFkgT0YgQU5ZIEtJTkQsIEVYUFJFU1MgT1IKSU1QTElFRCwgSU5DTFVESU5HIEJVVCBOT1QgTElNSVRFRCBUTyBUSEUgV0FSUkFOVElFUyBPRiBNRVJDSEFOVEFCSUxJVFksCkZJVE5FU1MgRk9SIEEgUEFSVElDVUxBUiBQVVJQT1NFIEFORCBOT05JTkZSSU5HRU1FTlQuIElOIE5PIEVWRU5UIFNIQUxMIFRIRQpBVVRIT1JTIE9SIENPUFlSSUdIVCBIT0xERVJTIEJFIExJQUJMRSBGT1IgQU5ZIENMQUlNLCBEQU1BR0VTIE9SIE9USEVSCkxJQUJJTElUWSwgV0hFVEhFUiBJTiBBTiBBQ1RJT04gT0YgQ09OVFJBQ1QsIFRPUlQgT1IgT1RIRVJXSVNFLCBBUklTSU5HIEZST00sCk9VVCBPRiBPUiBJTiBDT05ORUNUSU9OIFdJVEggVEhFIFNPRlRXQVJFIE9SIFRIRSBVU0UgT1IgT1RIRVIgREVBTElOR1MgSU4gVEhFClNPRlRXQVJFLgo="
+            }
+        }
+    }
 }

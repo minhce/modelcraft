@@ -3,7 +3,7 @@ title: Use ModelCraft with an AI assistant
 summary: Let your own AI assistant or script look at the model and build simple solids: permissions, connecting through CadCraft Studio, and the activity log.
 section: tasks
 order: 125
-keywords: ai, assistant, agent, mcp, model context protocol, script, automation, modeling, box, cylinder, permissions, disconnect, activity
+keywords: ai, assistant, agent, mcp, model context protocol, script, automation, modeling, box, cylinder, render, render queue, permissions, disconnect, activity
 ---
 
 ## What you will learn
@@ -42,12 +42,26 @@ A browser tab can't open a connection for an assistant: in the browser apps the 
 | `view_screenshot` | Read | A picture of the 3D view as shown |
 | `box_add`, `cylinder_add` | Edit | A box or a cylinder as a new group, at a place and size you or it give ("3m", "10'" or a number in the model's unit) |
 | `instance_move`, `instances_erase` | Edit | Moves or erases groups and components |
+| `faces_list`, `materials_list` | Read | The faces of a group or of the loose geometry (each one's direction, area and centre); the materials and colours it can paint with |
+| `push_pull` | Edit | Pushes or pulls a face, as {{ui:Push/Pull}} does |
+| `paint` | Edit | Paints faces or a whole group with a colour or a material |
+| `group_make` | Edit | Makes a group or a component of loose faces and groups |
+| `scene_add`, `scene_show` | Edit | Saves the view as a scene; goes to a saved scene |
+| `mesh_add` | Edit | A mesh object to start from (cube, sphere, cylinder …), as the Mesh workspace adds it |
+| `modifiers_list`, `modifier_add`, `modifier_set`, `modifier_remove` | Read / Edit | A mesh's modifier stack: mirror, array, subdivision, bevel and the rest; nothing is applied for good |
+| `usd_export` | Export | The model as OpenUSD (.usda, .usdc or .usdz), as saving the model as USD writes it ([USD](topic:usd)); to a folder you allowed in Studio, else a download |
+| `render_still` | Export | A rendered picture of the view or of a saved scene, as the {{ui:Render}} dialog's {{ui:Render}} button makes it, with your Render settings unless it asks for others (fast or high quality, size, samples, sky); a PNG it can look at, or a PNG, EXR or render file in a folder you allowed in Studio ([Render a picture](topic:render)) |
+| `render_queue` | Export | Adds high-quality pictures to the Render dialog's queue (the view, or saved scenes) and runs the queue; the finished pictures go to a folder you allowed, or stay in the Render dialog's {{ui:Render queue}} for you. Needs WebGPU |
 | `undo` | Edit | Takes back its own steps |
 
-Solids an assistant makes come in as groups, so they never merge with what you drew. Saving and exporting stay with you.
+Solids an assistant makes come in as groups, so they never merge with what you drew. There is no tool that saves the model: saving stays with you, and exporting or rendering needs **Export** ticked. A render changes nothing in the model; rendering a saved scene moves the view to it, as {{ui:Scenes}} does.
 
 ## If something doesn't work
 
 - **The assistant sees no ModelCraft tools:** check that the switch is on in this window, and that the window is open in Studio.
 - **"needs the edit permission":** tick **Edit** under {{ui:Assistants}}, then ask again.
 - **"401" or "token" errors:** the token changed (Studio restarted, or {{ui:New token}}). Copy the new one into the assistant's settings.
+
+## See also
+
+- [Recipes for AI assistants](common:assistants-recipes): worked examples, each with the tools it calls.

@@ -9,9 +9,10 @@
  *
  *   const v = new View3D(glCanvas, overCanvas, {model, cam, ui});
  *   v.style = {mode: 'shaded'|'hidden'|'wire'|'xray', edges, shadows, sun: {…}};  v.invalidate();
- *   v.textures = {material(key) → THREE.Material | null, uv(p, n) → [u, v]}   textures in the shaded style (0.5 RC.7 /
+ *   v.textures = {material(key) → THREE.Material | null, uv(p, n) → [u, v], tile?(key) → [w, h] metres}   (tile: a mesh's UVs × it, MT.1)   textures in the shaded style (0.5 RC.7 /
  *                RC.11 (b); ModelCraft sets it): key 'mat:<id>' a library material (UVs from uv()), 'img:<id>' an imported
  *                image (UVs from the face's own placement in its paint); without the hook they show their colour
+ *   v.decals = (def, path) → [THREE.Object3D]   (0.7 MT.6) the decals on a placement, drawn in the shaded style (ModelCraft sets it)
  *   v.drawExtra = (g, project(p) → [x, y, depth] | null, colours) => …   the app's own marks on the overlay (lamps)
  * `ui()` returns {path, sel, overlay, guidesOn, dimsOn, present} at draw time. present (0.4 M28, presentation view): no axes,
  * guides, guide points, open-group box, inference marks, hover or selection highlight — only the model (and its dimensions);
@@ -20,7 +21,8 @@
  */
 import * as THREE from 'three';
 import { add, sub, mul, dot, norm, apply, invert, dist, bboxAdd, IDENT } from './vec.js';
-import { faceTris, faceNormal, edgeFaces, smoothNormals, paintHex, isMaterialPaint, isImagePaint, imageId, imageUV } from './model.js';
+import { faceTris, faceNormal, edgeFaces, smoothNormals, paintHex, isMaterialPaint, isImagePaint, imageId, imageUV, MESH_HOOKS } from './model.js';
+import { FL_DEAD, FL_HIDE, FL_SHARP, FL_SEAM } from './mesh.js';
 import { sunPosition } from './sun.js';
 import { dimLayout, dimTextBox, dimText, sectionLayout } from './infer.js';
 import { formatLength } from './units.js';
@@ -68,6 +70,7 @@ export class View3D {
       .observe(document.documentElement, { attributes: true, attributeFilter: ['data-space'] });
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(gl.parentElement);
+    this.ro.observe(gl);   // 0.7 MD.5: the UV workspace narrows the canvas beside its UV editor
     this.resize();
   }
 
@@ -78,7 +81,7 @@ export class View3D {
     this.tok = t;
     this.c = {
       bg: t('--sheet', '#f3f6f8'), ink: t('--ink', '#17202b'), ink2: t('--ink-2', '#34404e'), sel: t('--layer-blue', '#1e48c8'),
-      red: t('--layer-red', '#b3122e'), green: t('--layer-green', '#17703a'), blue: t('--layer-blue', '#1e48c8'), grid: t('--grid', '#d5dde5'),
+      red: t('--layer-red', '#b3122e'), magenta: t('--layer-magenta', '#a3237a'), green: t('--layer-green', '#17703a'), blue: t('--layer-blue', '#1e48c8'), grid: t('--grid', '#d5dde5'),
       front: dark ? '#c9c3b5' : '#f2efe7', back: dark ? '#5d7186' : '#a9bacb',
       cap: dark ? '#8d96a0' : '#4b5866', section: t('--layer-ochre', '#a8641a'),
     };
@@ -88,7 +91,7 @@ export class View3D {
 
   resize() {
     const host = this.gl.parentElement;
-    this.w = Math.max(1, host.clientWidth); this.h = Math.max(1, host.clientHeight);
+    this.w = Math.max(1, this.gl.clientWidth || host.clientWidth); this.h = Math.max(1, this.gl.clientHeight || host.clientHeight);
     this.renderer.setSize(this.w, this.h, false);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.over.width = Math.round(this.w * dpr); this.over.height = Math.round(this.h * dpr);
@@ -104,11 +107,19 @@ export class View3D {
   // ---- building the three.js scene from the model ----
   /** One geometry per definition and placement colour (M8: a painted group fills its faces that have none). */
   geometryOf(def, dflt = null) {
-    const key = def.id + '|' + (dflt || '');
+    const pv = this.uvPreview && this.uvPreview.defId === def.id ? this.uvPreview.mode : '';   // 0.7 MD.5: checker / stretch
+    const key = def.id + '|' + (dflt || '') + (pv ? '|uv:' + pv : '');
     let g = this.cache.get(key);
     // still right while it is the same definition object and it has not been edited in place since (model.kept)
     if (g && g.def === def && (this.model.kept ? this.model.kept(def, g) : g.v === this.model.version)) return g;
+    // a mesh (0.7 MD.1/MD.2): the same mesh with the same topology = only points moved (a drag, an undo of one): update in place
+    if (g && def.mesh && g.mesh === def.shown && g.topo === def.shown.topo && g.liveTopo === def.shown.liveTopo && !g.mats.length) {
+      if (g.mv !== def.shown.v || g.live !== def.shown.live) { this.meshMoved(g); g.live = def.shown.live; }
+      g.def = def; Object.assign(g, this.model.stamp ? this.model.stamp(def) : { v: this.model.version });
+      return g;
+    }
     if (g) { g.faces?.dispose(); g.edges?.dispose(); for (const x of g.mats || []) x.geometry.dispose(); }
+    if (def.mesh) { g = this.meshGeometry(def, dflt); this.cache.set(key, g); return g; }
     const plain = [];   // [fid, normal, colour, triangles] of the faces drawn in colour
     let ni = 0;
     const front = new THREE.Color(paintHex(dflt) || this.c.front);
@@ -181,6 +192,320 @@ export class View3D {
     return g;
   }
 
+  /**
+   * A mesh definition's geometry (0.7 MD.1), straight from the mesh's arrays: one vertex per face corner (its normal
+   * smooth inside a fan and split at sharp edges, or the mesh's own 'normal' layer), triangles from mesh.triangulate(),
+   * hard lines for sharp and open edges. Faces painted with a library material or an image go in their own meshes with
+   * UVs (the mesh's 'uv' layer when it has one).
+   */
+  meshGeometry(def, dflt) {
+    const mesh = def.shown || def.mesh, P = mesh.P, hV = mesh.hV;   // MD.3: with its modifiers
+    const T = mesh.triangulate(), N = mesh.cornerNormals();
+    const front = new THREE.Color(paintHex(dflt) || this.c.front);
+    const tex = this.textures, uvA = mesh.attrArray('uv');
+    const maskA = this.showMask && def.mesh === mesh ? mesh.attrArray('mask') : null;   // MD.7: sculpting shows the mask darker
+    // MD.5: the UV workspace's preview draws every face with the checker (its UVs) or coloured by its stretch
+    const pv = this.uvPreview && this.uvPreview.defId === def.id ? this.uvPreview : null, pvKey = pv ? 'uv:' + pv.mode : null;
+    const st = pv?.mode === 'stretch' ? pv.stretch?.(mesh) : null;
+    const stPal = st ? [new THREE.Color(this.c.blue || '#1e48c8'), new THREE.Color(this.c.green || '#17703a'), new THREE.Color(this.c.red || '#b3122e')] : null;
+    const colOf = new Map();
+    const faceKind = new Int32Array(mesh.nf).fill(-1);   // -1 plain, else index into mats
+    const matKeys = [];
+    for (let f = 0; f < mesh.nf; f++) {
+      if (mesh.faceDead(f)) continue;
+      const paint = mesh.facePaint(f) || dflt;
+      const tkey = isMaterialPaint(paint) ? paint : isImagePaint(paint) ? 'img:' + imageId(paint) : null;
+      if (pvKey) { let i = matKeys.indexOf(pvKey); if (i < 0) { i = matKeys.length; matKeys.push(pvKey); } faceKind[f] = i; continue; }
+      if (tex && tkey && tex.material(tkey)) { let i = matKeys.indexOf(tkey); if (i < 0) { i = matKeys.length; matKeys.push(tkey); } faceKind[f] = i; }
+    }
+    const color = (f) => {
+      const p = mesh.facePaint(f);
+      if (!p) return front;
+      let c = colOf.get(p);
+      if (!c) colOf.set(p, (c = new THREE.Color(paintHex(p) || this.c.front)));
+      return c;
+    };
+    let nPlain = 0;
+    for (let i = 0; i < T.n; i++) if (faceKind[T.face[i]] < 0) nPlain++;
+    const vOf = new Int32Array(mesh.nh).fill(-1);
+    const pos = new Float32Array(nPlain * 9), nor = new Float32Array(nPlain * 9), col = new Float32Array(nPlain * 9);
+    const index = new Uint32Array(nPlain * 3);
+    let nv = 0, k = 0;
+    const mats = matKeys.map((id) => ({ id, pos: [], nor: [], col: [], uv: [] }));
+    const fn = [0, 0, 0];
+    for (let i = 0; i < T.n; i++) {
+      const f = T.face[i], mk = faceKind[f];
+      if (mk >= 0) {
+        const b = mats[mk], paint = mesh.facePaint(f) || dflt, img = b.id.startsWith('img:'), uvp = b.id.startsWith('uv:');
+        // 0.7 MT.1: a material's texture repeats every tile (metres), so one unit of the mesh's UVs = one tile (RENDER-SPEC § 6.6)
+        if (b.ts === undefined) b.ts = uvA && !img && !uvp && tex && tex.tile ? tex.tile(b.id) : null;
+        const c = st ? stretchColor(st[f], this._stA || (this._stA = new THREE.Color()), stPal) : color(f);
+        mesh.faceNormal(f, fn);
+        for (let q = 0; q < 3; q++) {
+          const h = T.tri[i * 3 + q], v = hV[h] * 3, p = [P[v], P[v + 1], P[v + 2]];
+          const w = uvA ? (b.ts ? [uvA[h * 2] * b.ts[0], uvA[h * 2 + 1] * b.ts[1]] : [uvA[h * 2], uvA[h * 2 + 1]]) : uvp ? [0, 0] : img ? imageUV(paint, p) : tex.uv(p, fn);
+          b.pos.push(p[0], p[1], p[2]); b.nor.push(N[h * 3], N[h * 3 + 1], N[h * 3 + 2]); b.col.push(c.r, c.g, c.b); b.uv.push(w[0], w[1]);
+        }
+        continue;
+      }
+      const c = color(f);
+      for (let q = 0; q < 3; q++) {
+        const h = T.tri[i * 3 + q];
+        let j = vOf[h];
+        if (j < 0) {
+          j = vOf[h] = nv++;
+          const v = hV[h] * 3, o = j * 3;
+          pos[o] = P[v]; pos[o + 1] = P[v + 1]; pos[o + 2] = P[v + 2];
+          nor[o] = N[h * 3]; nor[o + 1] = N[h * 3 + 1]; nor[o + 2] = N[h * 3 + 2];
+          col[o] = c.r; col[o + 1] = c.g; col[o + 2] = c.b;
+          if (maskA) { const k = 1 - 0.6 * maskA[hV[h]]; col[o] *= k; col[o + 1] *= k; col[o + 2] *= k; }
+        }
+        index[k++] = j;
+      }
+    }
+    const faces = new THREE.BufferGeometry();
+    faces.setAttribute('position', new THREE.BufferAttribute(pos.slice(0, nv * 3), 3));
+    faces.setAttribute('normal', new THREE.BufferAttribute(nor.slice(0, nv * 3), 3));
+    faces.setAttribute('color', new THREE.BufferAttribute(col.slice(0, nv * 3), 3));
+    faces.setIndex(new THREE.BufferAttribute(index, 1));
+    // hard lines: sharp edges and open ones, once per edge, where a face that shows meets it
+    let ne = 0;
+    const tw = mesh.hTw, hFl = mesh.hFl, hF = mesh.hF, ff = mesh.fFl;
+    const shows = (h) => !(hFl[h] & FL_DEAD) && !(ff[hF[h]] & FL_HIDE);
+    const hard = (h) => shows(h) && (tw[h] < 0 || ((hFl[h] & FL_SHARP) && (tw[h] > h || !shows(tw[h]))));
+    for (let h = 0; h < mesh.nh; h++) if (hard(h)) ne++;
+    const cl = def.curve ? MESH_HOOKS.lines?.(def) : null;   // MD.6: a curve object draws its curve too
+    const ep = new Float32Array(ne * 6 + (cl ? cl.length : 0));
+    if (cl) ep.set(cl, ne * 6);
+    k = 0;
+    for (let h = 0; h < mesh.nh; h++) {
+      if (!hard(h)) continue;
+      const a = hV[h] * 3, b = mesh.head(h) * 3;
+      ep[k++] = P[a]; ep[k++] = P[a + 1]; ep[k++] = P[a + 2]; ep[k++] = P[b]; ep[k++] = P[b + 1]; ep[k++] = P[b + 2];
+    }
+    const edges = new THREE.BufferGeometry();
+    edges.setAttribute('position', new THREE.BufferAttribute(ep, 3));
+    const mg = mats.map((b) => {
+      const x = new THREE.BufferGeometry();
+      x.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
+      x.setAttribute('normal', new THREE.Float32BufferAttribute(b.nor, 3));
+      x.setAttribute('color', new THREE.Float32BufferAttribute(b.col, 3));
+      x.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
+      return { id: b.id, geometry: x };
+    });
+    const cornerOf = new Int32Array(nv);
+    for (let h = 0; h < mesh.nh; h++) if (vOf[h] >= 0) cornerOf[vOf[h]] = h;
+    const edgeHe = new Int32Array(ne);
+    k = 0;
+    for (let h = 0; h < mesh.nh; h++) if (hard(h)) edgeHe[k++] = h;
+    return { def, ...(this.model.stamp ? this.model.stamp(def) : { v: this.model.version }), faces, edges, mats: mg, hasFaces: nv > 0 || mg.length > 0,
+      mesh, topo: mesh.topo, mv: mesh.v, live: mesh.live, liveTopo: mesh.liveTopo, cornerOf, edgeHe, normalsStale: false,
+      ...(maskA ? { masked: true, baseCol: Float32Array.from(faces.attributes.color.array).map((x, i) => { const v = hV[cornerOf[Math.floor(i / 3)]]; return x / (1 - 0.6 * maskA[v]); }) } : {}) };
+  }
+  /**
+   * A mesh's points moved, nothing else (0.7 MD.2): copy the positions into the buffers in place; normals too for a
+   * mesh up to 300 000 corners (a bigger one gets them on settle(): after a drag ends, an undo).
+   */
+  meshMoved(g) {
+    const mesh = g.mesh, P = mesh.P, hV = mesh.hV;
+    const pos = g.faces.attributes.position.array;
+    for (let j = 0; j < g.cornerOf.length; j++) { const v = hV[g.cornerOf[j]] * 3, o = j * 3; pos[o] = P[v]; pos[o + 1] = P[v + 1]; pos[o + 2] = P[v + 2]; }
+    g.faces.attributes.position.needsUpdate = true;
+    if (g.masked) {
+      // MD.7: the mask painted in this stroke
+      const mk = mesh.attrArray('mask'), col = g.faces.attributes.color.array;
+      if (mk) for (let j = 0; j < g.cornerOf.length; j++) { const k = 1 - 0.6 * mk[hV[g.cornerOf[j]]]; for (let q = 0; q < 3; q++) col[j * 3 + q] = g.baseCol[j * 3 + q] * k; }
+      g.faces.attributes.color.needsUpdate = true;
+    }
+    if (mesh.nh <= 300000) this.meshNormals(g); else g.normalsStale = true;
+    const ep = g.edges.attributes.position.array;
+    for (let k = 0; k < g.edgeHe.length; k++) {
+      const h = g.edgeHe[k], a = hV[h] * 3, b = mesh.head(h) * 3, o = k * 6;
+      ep[o] = P[a]; ep[o + 1] = P[a + 1]; ep[o + 2] = P[a + 2]; ep[o + 3] = P[b]; ep[o + 4] = P[b + 1]; ep[o + 5] = P[b + 2];
+    }
+    g.edges.attributes.position.needsUpdate = true;
+    g.faces.computeBoundingSphere(); g.edges.computeBoundingSphere();
+    g.boxes = null; g.closed = undefined;
+    g.mv = mesh.v;
+  }
+  meshNormals(g) {
+    const N = g.mesh.cornerNormals(), nor = g.faces.attributes.normal.array;
+    for (let j = 0; j < g.cornerOf.length; j++) { const h = g.cornerOf[j] * 3, o = j * 3; nor[o] = N[h]; nor[o + 1] = N[h + 1]; nor[o + 2] = N[h + 2]; }
+    g.faces.attributes.normal.needsUpdate = true;
+    g.normalsStale = false;
+  }
+  /** After an edit settles (a drag put down, an undo): normals a big mesh skipped while it moved. */
+  settle() { let any = false; for (const g of this.cache.values()) if (g.normalsStale) { this.meshNormals(g); any = true; } if (any) this.invalidate(); }
+
+  /**
+   * The mesh being edited (0.7 MD.2): its vertices (in vertex mode), every edge, the selected faces tinted, and what the
+   * pointer is over, drawn over the model in the placement's world matrix. state = {mesh, m, sel (mesh/select.js), mode,
+   * hover: {kind, el} | null, ver (goes up when the selection changes)} | null. Rebuilt when the mesh's shape or the
+   * selection changes; points moving only update the buffers.
+   */
+  setMeshEdit(state) {
+    this.meshEditState = state;
+    if (!state && this.editGroup) {
+      for (const o of [...this.editGroup.children]) { o.geometry?.dispose(); this.editGroup.remove(o); }
+      this.scene.remove(this.editGroup); this.editGroup = null; this._editKey = null;
+    }
+    this.invalidate();
+  }
+  /**
+   * MD.6: the curve being edited — {m (its world matrix), ver, pts: Float32Array (local, 3 each), kinds: Uint8Array (0 a
+   * point, 1 a handle), sel: Uint8Array, hover (index or −1), lines: Float32Array (the control polygon and handle bars)}.
+   */
+  setCurveEdit(state) {
+    this.curveEditState = state;
+    if (!state && this.curveGroup) { for (const o of [...this.curveGroup.children]) { o.geometry?.dispose(); this.curveGroup.remove(o); } this.scene.remove(this.curveGroup); this.curveGroup = null; }
+    this._curveKey = null;
+    this.invalidate();
+  }
+  buildCurveEdit() {
+    const st = this.curveEditState;
+    if (!this.curveGroup) { this.curveGroup = new THREE.Group(); this.curveGroup.matrixAutoUpdate = false; this.scene.add(this.curveGroup); }
+    this.curveGroup.matrix.fromArray(st.m);
+    this.curveGroup.updateMatrixWorld(true);
+    const key = st.ver + '|' + (this.c.sel || '') + '|' + (this.c.ink || '');
+    if (this._curveKey === key) return;
+    this._curveKey = key;
+    for (const o of [...this.curveGroup.children]) { o.geometry?.dispose(); this.curveGroup.remove(o); }
+    const ink = new THREE.Color(this.c.ink2 || this.c.ink), on = new THREE.Color(this.c.sel || '#2f7cf6'), hot = new THREE.Color(this.c.magenta || '#a3237a');
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.BufferAttribute(st.lines, 3));
+    const lines = new THREE.LineSegments(lg, this.xmat('curveedit-lines', () => new THREE.LineBasicMaterial({ color: this.c.ink2 || this.c.ink, transparent: true, opacity: 0.7, depthTest: false })));
+    lines.renderOrder = 32;
+    this.curveGroup.add(lines);
+    for (const kind of [0, 1]) {
+      const idx = [];
+      for (let i = 0; i < st.kinds.length; i++) if (st.kinds[i] === kind) idx.push(i);
+      if (!idx.length) continue;
+      const pp = new Float32Array(idx.length * 3), pc = new Float32Array(idx.length * 3);
+      idx.forEach((i, k) => { pp.set(st.pts.subarray(i * 3, i * 3 + 3), k * 3); const c = i === st.hover ? hot : st.sel[i] ? on : ink; pc.set([c.r, c.g, c.b], k * 3); });
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pp, 3)); g.setAttribute('color', new THREE.BufferAttribute(pc, 3));
+      const pts = new THREE.Points(g, this.xmat('curveedit-pts-' + kind, () => new THREE.PointsMaterial({ vertexColors: true, size: kind ? 6 : 9, sizeAttenuation: false, depthTest: false })));
+      pts.renderOrder = 33;
+      this.curveGroup.add(pts);
+    }
+  }
+  /** MD.5: the UV preview's materials — a checker in the UVs (8 × 8 a unit, labelled A1…H8 to show which way it runs), or stretch colours. */
+  uvMaterial(id) {
+    this._uvMats ??= new Map();
+    let m = this._uvMats.get(id);
+    if (m) return m;
+    if (id === 'uv:checker') {
+      const cv = document.createElement('canvas'), N = 512, n = 8, g = cv.getContext('2d');
+      cv.width = cv.height = N;
+      for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) { g.fillStyle = (x + y) % 2 ? '#3d4a5a' : '#e8ecf0'; g.fillRect(x * N / n, y * N / n, N / n, N / n); }
+      g.font = 'bold 22px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) { g.fillStyle = (x + y) % 2 ? '#e8ecf0' : '#3d4a5a'; g.fillText(String.fromCharCode(65 + y) + (x + 1), (x + 0.5) * N / n, (y + 0.5) * N / n); }
+      const tx = new THREE.CanvasTexture(cv);
+      tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4;
+      m = new THREE.MeshLambertMaterial({ map: tx, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+    } else m = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+    this._uvMats.set(id, m);
+    return m;
+  }
+  buildMeshEdit() {
+    const st = this.meshEditState;
+    if (!st) return;
+    const me = st.mesh, key = me.uid + '|' + me.topo + '|' + st.ver + '|' + st.mode + '|' + (this.c.sel || '') + '|' + (this.c.ink || '') + '|' + !!st.front;
+    if (!this.editGroup) { this.editGroup = new THREE.Group(); this.editGroup.matrixAutoUpdate = false; this.scene.add(this.editGroup); }
+    this.editGroup.matrix.fromArray(st.m);
+    this.editGroup.updateMatrixWorld(true);
+    if (this._editKey === key) {
+      // same shape and selection: only positions may have moved
+      if (this._editV !== me.v) this.moveMeshEdit();
+      this.hoverMeshEdit();
+      return;
+    }
+    this._editKey = key; this._editV = me.v;
+    for (const o of [...this.editGroup.children]) { o.geometry?.dispose(); this.editGroup.remove(o); }
+    const P = me.P, hV = me.hV, sel = st.sel;
+    const ink = new THREE.Color(this.c.ink2 || this.c.ink), on = new THREE.Color(this.c.sel || '#2f7cf6');
+    const crease = me.attrArray('crease'), cr = new THREE.Color(this.c.magenta || '#a3237a'), mix = new THREE.Color();   // MD.4: creased edges
+    const seamC = new THREE.Color(this.c.red || '#b3122e');   // MD.5: seams
+    // edges: every one, once
+    const eh = [];
+    for (let h = 0; h < me.nh; h++) if (!me.heDead(h) && me.edgeOf(h) === h && !(me.fFl[me.hF[h]] & FL_HIDE)) eh.push(h);
+    const ep = new Float32Array(eh.length * 6), ec = new Float32Array(eh.length * 6);
+    eh.forEach((h, k) => {
+      const a = hV[h] * 3, b = me.head(h) * 3, c = sel.e[h] ? on : me.hFl[h] & FL_SEAM ? seamC : crease && crease[h] > 0 ? mix.copy(ink).lerp(cr, 0.35 + 0.65 * crease[h]) : ink;
+      ep.set([P[a], P[a + 1], P[a + 2], P[b], P[b + 1], P[b + 2]], k * 6);
+      ec.set([c.r, c.g, c.b, c.r, c.g, c.b], k * 6);
+    });
+    const eg = new THREE.BufferGeometry();
+    eg.setAttribute('position', new THREE.BufferAttribute(ep, 3)); eg.setAttribute('color', new THREE.BufferAttribute(ec, 3));
+    // MD.8: "in front" (retopology) draws the cage over the surface it is built on
+    const lines = new THREE.LineSegments(eg, this.xmat('meshedit-lines' + (st.front ? '-front' : ''), () => new THREE.LineBasicMaterial({ vertexColors: true, depthTest: !st.front, transparent: true, opacity: 0.95 })));
+    lines.renderOrder = 30; lines.userData.eh = eh;
+    this.editGroup.add(lines);
+    // vertices (vertex mode)
+    if (st.mode === 'vert') {
+      const vs = [];
+      for (let v = 0; v < me.nv; v++) if (!me.vertDead(v)) vs.push(v);
+      const vp = new Float32Array(vs.length * 3), vc = new Float32Array(vs.length * 3);
+      vs.forEach((v, k) => { const c = sel.v[v] ? on : ink; vp.set([P[v * 3], P[v * 3 + 1], P[v * 3 + 2]], k * 3); vc.set([c.r, c.g, c.b], k * 3); });
+      const vg = new THREE.BufferGeometry();
+      vg.setAttribute('position', new THREE.BufferAttribute(vp, 3)); vg.setAttribute('color', new THREE.BufferAttribute(vc, 3));
+      const pts = new THREE.Points(vg, this.xmat('meshedit-pts' + (st.front ? '-front' : ''), () => new THREE.PointsMaterial({ vertexColors: true, size: 5, sizeAttenuation: false, depthTest: !st.front })));
+      pts.renderOrder = 31; pts.userData.vs = vs;
+      this.editGroup.add(pts);
+    }
+    // selected faces, tinted
+    const T = me.triangulate(), fp = [];
+    for (let i = 0; i < T.n; i++) if (sel.f[T.face[i]]) for (let q = 0; q < 3; q++) { const v = hV[T.tri[i * 3 + q]] * 3; fp.push(P[v], P[v + 1], P[v + 2]); }
+    if (fp.length) {
+      const fg = new THREE.BufferGeometry();
+      fg.setAttribute('position', new THREE.Float32BufferAttribute(fp, 3));
+      const fm = new THREE.Mesh(fg, this.xmat('meshedit-faces', () => new THREE.MeshBasicMaterial({ color: on, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })));
+      fm.renderOrder = 29; fm.userData.selFaces = true;
+      this.editGroup.add(fm);
+    }
+    this.hoverMeshEdit();
+  }
+  moveMeshEdit() {
+    const st = this.meshEditState, me = st.mesh, P = me.P, hV = me.hV;
+    for (const o of this.editGroup.children) {
+      if (o.userData.eh) {
+        const a = o.geometry.attributes.position.array;
+        o.userData.eh.forEach((h, k) => { const x = hV[h] * 3, y = me.head(h) * 3, b = k * 6; a[b] = P[x]; a[b + 1] = P[x + 1]; a[b + 2] = P[x + 2]; a[b + 3] = P[y]; a[b + 4] = P[y + 1]; a[b + 5] = P[y + 2]; });
+        o.geometry.attributes.position.needsUpdate = true; o.geometry.computeBoundingSphere();
+      } else if (o.userData.vs) {
+        const a = o.geometry.attributes.position.array;
+        o.userData.vs.forEach((v, k) => { a[k * 3] = P[v * 3]; a[k * 3 + 1] = P[v * 3 + 1]; a[k * 3 + 2] = P[v * 3 + 2]; });
+        o.geometry.attributes.position.needsUpdate = true; o.geometry.computeBoundingSphere();
+      } else if (o.userData.selFaces) { this._editKey = null; }   // tinted faces: rebuilt next time
+    }
+    this._editV = me.v;
+  }
+  hoverMeshEdit() {
+    const st = this.meshEditState, old = this.editGroup.children.find((o) => o.userData.hover);
+    if (old) { old.geometry.dispose(); this.editGroup.remove(old); }
+    const hv = st.hover, me = st.mesh, P = me.P;
+    if (!hv) return;
+    const col = this.xmat('meshedit-hover', () => new THREE.LineBasicMaterial({ color: this.c.red || '#e0483e', depthTest: false, transparent: true }));
+    let obj = null;
+    const pt = (v) => [P[v * 3], P[v * 3 + 1], P[v * 3 + 2]];
+    if (hv.kind === 'vert') {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pt(hv.el), 3));
+      obj = new THREE.Points(g, this.xmat('meshedit-hpt', () => new THREE.PointsMaterial({ color: this.c.red || '#e0483e', size: 9, sizeAttenuation: false, depthTest: false })));
+    } else if (hv.kind === 'edge') {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute([...pt(me.hV[hv.el]), ...pt(me.head(hv.el))], 3));
+      obj = new THREE.LineSegments(g, col);
+    } else if (hv.kind === 'face') {
+      const cs = me.faceCorners(hv.el, []), a = [];
+      cs.forEach((h, i) => a.push(...pt(me.hV[h]), ...pt(me.hV[cs[(i + 1) % cs.length]])));
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(a, 3));
+      obj = new THREE.LineSegments(g, col);
+    }
+    if (obj) { obj.renderOrder = 40; obj.userData.hover = true; this.editGroup.add(obj); }
+  }
+
   /** Free one definition's geometry (or all). */
   dropCache(id = null) {
     for (const k of id === null ? [...this.cache.keys()] : [id]) {
@@ -225,7 +550,8 @@ export class View3D {
     let bb = g.boxes.get(key);
     if (bb === undefined) {
       bb = null;
-      for (const p of def.verts.values()) bb = bboxAdd(bb, apply(wm, p));
+      if (def.mesh) { const S = def.shown, P = S.P; for (let v = 0; v < S.nv; v++) if (!S.vertDead(v)) bb = bboxAdd(bb, apply(wm, [P[v * 3], P[v * 3 + 1], P[v * 3 + 2]])); }
+      else for (const p of def.verts.values()) bb = bboxAdd(bb, apply(wm, p));
       if (g.boxes.size > 4096) g.boxes.clear();
       g.boxes.set(key, bb);
     }
@@ -262,7 +588,7 @@ export class View3D {
       // presentation view (0.6 DC.21): the whole model as it is, so nothing fades outside an open group
       const active = u.present || (path.length >= u.path.length && u.path.every((x, i) => path[i] === x));
       const m = active ? mats.on : mats.off;
-      if (g.hasFaces && st.mode !== 'wire') {
+      if (g.hasFaces && st.mode !== 'wire' && !def.lattice) {   // a lattice cage (MD.3) shows as wires only
         const f = new THREE.Mesh(g.faces, m.front);
         f.castShadow = st.shadows; f.receiveShadow = st.shadows;
         parent.add(f);
@@ -271,7 +597,7 @@ export class View3D {
         // library materials (0.5 RC.7): textured in the shaded style of the open context; elsewhere drawn like other faces
         const closed = cut && st.mode !== 'xray' && this.closedDef(def, g);
         for (const x of g.mats || []) {
-          const textured = active && st.mode === 'shaded' ? this.textures?.material(x.id) : null;
+          const textured = x.id.startsWith('uv:') ? this.uvMaterial(x.id) : active && st.mode === 'shaded' ? this.textures?.material(x.id) : null;
           const tm = new THREE.Mesh(x.geometry, textured || m.front);
           tm.castShadow = st.shadows; tm.receiveShadow = st.shadows;
           parent.add(tm);
@@ -279,6 +605,7 @@ export class View3D {
           const bm = textured ? m.texBack : m.back;
           if (bm) { const b = new THREE.Mesh(x.geometry, bm); b.castShadow = false; b.receiveShadow = st.shadows; parent.add(b); }
         }
+        if (this.decals && st.mode === 'shaded') for (const o of this.decals(def, path)) { o.receiveShadow = st.shadows; parent.add(o); }   // 0.7 MT.6
       }
       if (st.edges || st.mode === 'wire') parent.add(new THREE.LineSegments(g.edges, m.edge));
       for (const [iid, inst] of def.insts) {
@@ -304,6 +631,7 @@ export class View3D {
 
   /** Is a definition's own geometry closed (every edge between two faces)? Kept with its geometry until it changes. */
   closedDef(def, g) {
+    if (g.closed === undefined && def.mesh) { const I = def.shown; let open = false; for (let h = 0; h < I.nh && !open; h++) if (!I.heDead(h) && I.hTw[h] < 0) open = true; g.closed = !open && I.faceCount > 0; }
     if (g.closed === undefined) {
       const ef = edgeFaces(def);
       g.closed = def.faces.size > 0 && [...ef.values()].every((l) => l.length === 2) && [...def.faces.values()].every((f) => !f.hidden);
@@ -431,6 +759,8 @@ export class View3D {
     const u = this.ui();
     const key = this.model.version + '|' + u.path.join('/') + '|' + JSON.stringify(this.style) + '|' + u.sel.map((s) => s.t + s.id).join(',') + '|' + this.c.bg + '|' + !!u.present;
     if (key !== this.builtFor) { this.build(); this.builtFor = key; }
+    if (this.meshEditState) this.buildMeshEdit();   // 0.7 MD.2: the mesh being edited
+    if (this.curveEditState) this.buildCurveEdit();   // 0.7 MD.6: the curve being edited
     this.cam.clip(this.radius || 20);
     const tc = this.tcam;
     tc.matrix.fromArray(invert(this.cam.view()));
@@ -546,6 +876,14 @@ export class View3D {
       g.fillRect(Math.min(r.x0, r.x1), Math.min(r.y0, r.y1), Math.abs(r.x1 - r.x0), Math.abs(r.y1 - r.y0));
       g.globalAlpha = 1;
       g.strokeRect(Math.min(r.x0, r.x1) + 0.5, Math.min(r.y0, r.y1) + 0.5, Math.abs(r.x1 - r.x0), Math.abs(r.y1 - r.y0));
+    }
+    if (o.brush) {
+      // MD.7: the sculpt brush, a circle round the pointer (dashed when it is off the mesh; magenta when it takes away)
+      const b = o.brush;
+      g.setLineDash(b.off ? [4, 4] : []); g.lineWidth = 1.5; g.strokeStyle = b.invert ? this.c.magenta || this.c.red : this.c.sel;
+      g.beginPath(); g.arc(b.x, b.y, Math.max(2, b.r), 0, Math.PI * 2); g.stroke();
+      g.globalAlpha = 0.5; g.beginPath(); g.arc(b.x, b.y, Math.max(1, b.r * (b.inner ?? 0.5)), 0, Math.PI * 2); g.stroke(); g.globalAlpha = 1;
+      g.setLineDash([]);
     }
     if (o.marker) {
       const s = this.cam.project(o.marker.p, vp);
@@ -697,3 +1035,9 @@ function mmul4(a, b) {
   return r;
 }
 export { bboxAdd };
+
+/** MD.5: a face's stretch (0 none … 1 a lot) as a colour: blue through green to the layer red. */
+function stretchColor(x, out, [a, b, r]) {
+  const t = Math.max(0, Math.min(1, x || 0));
+  return t < 0.5 ? out.copy(a).lerp(b, t * 2) : out.copy(b).lerp(r, (t - 0.5) * 2);
+}

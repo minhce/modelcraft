@@ -26,6 +26,7 @@ $__tools = [
         ['act', 'new', 'file-earmark-plus', Lang::t('ui.tool.new'), Lang::t('ui.tool.new.title')],
         ['act', 'open', 'folder2-open', Lang::t('ui.tool.open'), Lang::t('ui.tool.open.title')],
         ['act', 'save', 'download', Lang::t('ui.tool.save'), Lang::t('ui.tool.save.title')],
+        ['act', 'saveas', 'file-earmark-arrow-down', Lang::t('usd.save_as'), Lang::t('usd.save_as.title')],
         ['act', 'import', 'box-arrow-in-down', Lang::t('ui.tool.import'), Lang::t('ui.tool.import.title')],
     ],
     'Draw' => [   // i18n-ignore: group key
@@ -44,6 +45,7 @@ $__tools = [
         ['tool', 'follow', 'arrow-90deg-up', Lang::t('ui.tool.follow'), Lang::t('ui.tool.follow.title')],
         ['tool', 'paint', 'paint-bucket', Lang::t('ui.tool.paint'), Lang::t('ui.tool.paint.title')],
         ['tool', 'offset', 'bounding-box', Lang::t('ui.tool.offset'), Lang::t('ui.tool.offset.title')],
+        ['tool', 'divide', 'distribute-horizontal', Lang::t('ui.tool.divide'), Lang::t('ui.tool.divide.title')],
         ['tool', 'move', 'arrows-move', Lang::t('ui.tool.move'), Lang::t('ui.tool.move.title')],
         ['tool', 'rotate', 'arrow-repeat', Lang::t('ui.tool.rotate'), Lang::t('ui.tool.rotate.title')],
         ['tool', 'scale', 'arrows-angle-expand', Lang::t('ui.tool.scale'), Lang::t('ui.tool.scale.title')],
@@ -94,6 +96,8 @@ $__views = ['iso', 'top', 'front', 'right', 'back', 'left', 'bottom'];   // labe
                 <button type="button" role="menuitem" data-export="dae"><?= Lang::e('ui.export.dae') ?></button>
                 <button type="button" role="menuitem" data-export="obj"><?= Lang::e('ui.export.obj') ?></button>
                 <button type="button" role="menuitem" data-export="stl"><?= Lang::e('ui.export.stl') ?></button>
+                <button type="button" role="menuitem" data-export="ply"><?= Lang::e('ui.export.ply') ?></button>
+                <button type="button" role="menuitem" data-export="usd"><?= Lang::e('usd.menu.export') ?></button>
                 <button type="button" role="menuitem" data-export="print3d"><?= Lang::e('ui.export.print3d') ?></button>
                 <button type="button" role="menuitem" data-export="ifc"><?= Lang::e('ui.export.ifc') ?></button>
                 <button type="button" role="menuitem" data-act="storeys"><?= Lang::e('ui.export.storeys') ?></button>
@@ -106,6 +110,8 @@ $__views = ['iso', 'top', 'front', 'right', 'back', 'left', 'bottom'];   // labe
                 <button type="button" role="menuitem" data-export="print"><?= Lang::e('ui.export.print') ?></button>
                 <hr>
                 <button type="button" role="menuitem" data-export="render"><?= Lang::e('ui.export.render') ?></button>
+                <button type="button" role="menuitem" data-export="live"><?= Lang::e('rt.menu') ?></button>
+                <button type="button" role="menuitem" data-export="live-window"><?= Lang::e('rt.menu.window') ?></button>
                 <button type="button" role="menuitem" data-export="video"><?= Lang::e('ui.export.video') ?></button>
               </div>
             </details>
@@ -183,8 +189,12 @@ $__views = ['iso', 'top', 'front', 'right', 'back', 'left', 'bottom'];   // labe
         </div>
       </div>
     <?php endforeach; ?>
-    <input type="file" class="visually-hidden" accept=".modelcraft,.json" tabindex="-1" aria-hidden="true" data-file-open>
-    <input type="file" class="visually-hidden" accept=".skp,.dae,.obj,.glb,.gltf,.dwg,.dxf" tabindex="-1" aria-hidden="true" data-file-import>
+    <input type="file" class="visually-hidden" accept=".modelcraft,.json,.usd,.usda,.usdc,.usdz" tabindex="-1" aria-hidden="true" data-file-open>
+    <input type="file" class="visually-hidden" accept=".skp,.dae,.obj,.glb,.gltf,.dwg,.dxf,.ply,.stl,.abc,.fbx,.usd,.usda,.usdc,.usdz,.step,.stp,.3dm" tabindex="-1" aria-hidden="true" data-file-import>
+    <?php /* 0.7 LC.21 (session print-07): the Beginner menu style's own commands (input-modelcraft.js, beginner-mc.js) — clicked by that style only */ ?>
+    <?php foreach (['box', 'cylinder', 'sphere', 'cone', 'roof', 'hole-box', 'hole-cylinder', 'hole', 'solid', 'group', 'align-left', 'align-centerx', 'align-right', 'align-front', 'align-centery', 'align-back', 'align-bottom', 'align-centerz', 'align-top', 'drop'] as $__b): ?>
+      <button type="button" hidden data-input-only data-beginner="<?= e($__b) ?>"><?= Lang::e('input.cmd.beginner.' . $__b) ?></button>
+    <?php endforeach; ?>
   </div>
 
   <aside class="mc-panel mc-left" aria-label="<?= Lang::e('ui.left.aria') ?>">
@@ -212,7 +222,10 @@ $__views = ['iso', 'top', 'front', 'right', 'back', 'left', 'bottom'];   // labe
     <canvas class="mc-canvas" data-gl aria-hidden="true"></canvas>
     <canvas class="mc-canvas mc-over" data-over tabindex="0" aria-label="<?= Lang::e('ui.stage.canvas') ?>"></canvas>
     <div class="mc-hint" data-hint>
-      <p class="mc-hint-h"><?= Lang::e('ui.hint.h') ?></p>
+      <div class="mc-hint-head">
+        <p class="mc-hint-h"><?= Lang::e('ui.hint.h') ?></p>
+        <button type="button" class="mc-hint-close" data-hint-close aria-label="<?= Lang::e('ui.hint.close') ?>" title="<?= Lang::e('ui.hint.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+      </div>
       <ul data-keys-hint>
         <li><?= $__lx('ui.hint.rect', ['key' => '<kbd>R</kbd>', 'eg' => '<kbd>4m,3m</kbd>', 'enter' => '<kbd>Enter</kbd>']) ?></li>
         <li><?= $__lx('ui.hint.push', ['key' => '<kbd>P</kbd>']) ?></li>
@@ -221,7 +234,7 @@ $__views = ['iso', 'top', 'front', 'right', 'back', 'left', 'bottom'];   // labe
         <li><?= $__lx('ui.hint.camera', ['shift' => '<kbd>Shift</kbd>']) ?></li>
         <li><?= Lang::e('ui.hint.local') ?></li>
       </ul>
-      <p class="mc-hint-guide"><button type="button" class="btn-line btn-sm-cc" data-guide-open><i class="bi bi-signpost-2" aria-hidden="true"></i> <?= Lang::e('ui.hint.guide') ?></button></p>
+      <p class="mc-hint-guide"><button type="button" class="btn-line btn-sm-cc" data-guide-open><i class="bi bi-signpost-2" aria-hidden="true"></i> <?= Lang::e('ui.hint.tour') ?></button></p>
       <div data-recent-files data-max="6"></div>
     </div>
     <?php /* The guided first model (0.6 LC.21, session model-part-extra_PART_2): firstmodel.js reads the steps from the model; modelcraft.js fills the card. */ ?>
@@ -235,8 +248,10 @@ $__views = ['iso', 'top', 'front', 'right', 'back', 'left', 'bottom'];   // labe
     </div>
   </section>
 
-  <?php /* Animation (0.6 LC.10, session lc-model): the timeline under the view, built by timeline.js; hidden until Views › Timeline. */ ?>
-  <section class="mc-timeline" data-timeline aria-label="<?= Lang::e('ui.timeline.aria') ?>" hidden></section>
+  <?php /* Animation (0.6 LC.10, session lc-model): the timeline under the view, built by timeline.js; hidden until Views › Timeline.
+     data-phone="keep" (0.6.1 FIX-TIMELINE-PHONE): on a phone it stays under the view as on a desktop, never a phone sheet (a
+     sheet button for a section that is `hidden` opened a sheet 0 px tall). */ ?>
+  <section class="mc-timeline" data-timeline data-phone="keep" aria-label="<?= Lang::e('ui.timeline.aria') ?>" hidden></section>
 
   <aside class="mc-panel mc-right" aria-label="<?= Lang::e('ui.right.aria') ?>">
     <section class="mc-sec">

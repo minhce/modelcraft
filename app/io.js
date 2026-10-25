@@ -548,6 +548,7 @@ export function importDXF(model, text, name = 'Site plan', opts = {}) {
   let insUnits = 0;
   const blocks = new Map();
   let ents = [];
+  let acds = null;
   let i = 0;
   const at = () => pairs[i] || [0, 'EOF'];
   const isEnd = (...names) => at()[0] === 0 && names.includes(at()[1].trim());
@@ -593,11 +594,12 @@ export function importDXF(model, text, name = 'Site plan', opts = {}) {
         }
         i++;
       } else if (sec === 'ENTITIES') { ents = readList(true); i++; }
+      else if (sec === 'ACDSDATA') { const a = i; while (i < pairs.length && !isEnd('ENDSEC')) i++; acds = pairs.slice(a, i); i++; }   // DXF 2013+: the solids' ACIS data
       else { while (i < pairs.length && !isEnd('ENDSEC')) i++; i++; }
     } else if (isEnd('EOF')) break;
     else i++;
   }
-  return siteEdges(model, { insUnits, ents, blocks }, name, opts);
+  return siteEdges(model, { insUnits, ents, blocks, acds }, name, opts);
 }
 
 function dxfEnt(type, g, follow, top) {
@@ -677,6 +679,7 @@ function dxfEnt(type, g, follow, top) {
       return loops.length ? { t: 'hatch', loops: f ? loops.map((l) => l.map(([x, y]) => [-x, y])) : loops } : NONE;
     }
     case 'DIMENSION': case 'ARC_DIMENSION': case 'LARGE_RADIAL_DIMENSION': { const b = val(g, 2); return b ? { t: 'dim', block: b.toUpperCase() } : { t: 'skip', what: 'DIMENSION' }; }
+    case '3DSOLID': case 'REGION': case 'BODY': return { t: 'acis', type, groups: g, handle: (val(g, 5) || '').toUpperCase() };   // 0.7 D7.25: read in siteEdges
     default: return { t: 'skip', what: type };
   }
 }
@@ -832,6 +835,7 @@ function dwgEnt(e) {
       const ok = loops.filter((l) => l.length >= 3);
       return ok.length ? { t: 'hatch', loops: f ? ok.map((l) => l.map(([x, y]) => [-x, y])) : ok } : NONE;
     }
+    case '3DSOLID': case 'REGION': case 'BODY': return { t: 'acis', type: e.type, acis: e.acis || null };   // 0.7 D7.25: read in siteEdges
     default:
       if (/^DIMENSION_|^ARC_DIMENSION$|^LARGE_RADIAL_DIMENSION$/.test(e.type) && e.block) return { t: 'dim', block: String(e.block).toUpperCase() };
       return { t: 'skip', what: String(e.type === 'UNKNOWN' ? e.dxfName || 'unknown' : /DIMENSION/.test(e.type) ? 'DIMENSION' : e.type || 'unknown').slice(0, 40) };
@@ -965,6 +969,8 @@ function siteEdges(model, plan, name, opts = {}) {
   let units = null, k = UNIT_M[opts.unit] || 1;
   if (DXF_UNITS[plan.insUnits]) { units = DXF_UNITS[plan.insUnits][0]; k = DXF_UNITS[plan.insUnits][1]; }
   const segs = [], polys = [];
+  const solidDefs = [], acisND = [];   // 0.7 D7.25: other programs' solids (case 'acis')
+  let acdsMap = null;
   const MAX_SEGS = 2000000, MAX_TEXT_SEGS = 400000;
   let textSegs = 0;
   // 2D affine [a, b, c, d, e, f]: x' = a x + c y + e, y' = b x + d y + f
@@ -1076,6 +1082,20 @@ function siteEdges(model, plan, name, opts = {}) {
           for (const o of outers) polys.push({ loops: [o.l, ...o.holes].map((q) => q.pts.map((p) => P3(m, [p[0], p[1], 0]))) });
           break;
         }
+        case 'acis': {
+          // 0.7 D7.25: another program's solid (ACIS), read by cc-acis when the caller hands it in (opts.acis = the
+          // ./acis/ module); each body its own group (closed ones solids), placed as the drawing places it
+          if (!opts.acis) { skip(e.type); break; }
+          let data = e.acis;
+          if (!data && e.groups) {
+            data = opts.acis.acisFromDxf(e.groups);
+            if (!data && e.handle) { acdsMap ??= opts.acis.acisFromDxfDataStorage(plan.acds || []); data = acdsMap.get(e.handle.replace(/^0+(?=.)/, '')) || null; }
+          }
+          const r = opts.acis.readAcis(data);
+          for (const x of r.notDrawn) acisND.push(x);
+          for (const b of r.bodies) solidDefs.push(acisGroup(model, b, (p) => { const a = T(m, p); return [a[0] * k, a[1] * k, (p[2] || 0) * k]; }, e.type));
+          break;
+        }
         case 'dim': {
           const b = plan.blocks.get(e.block);
           if (!b) { skip(t('m3d.io.dimension_missing_block')); break; }
@@ -1110,7 +1130,59 @@ function siteEdges(model, plan, name, opts = {}) {
   const def = polys.length ? meshDef(model, polys, cleanName(name), 'group', segs) : edgesDef(model, segs, cleanName(name));
   report.edges = def.edges.size;
   report.faces = def.faces.size;
+  if (solidDefs.length || acisND.length) {
+    for (const d of solidDefs) model.place(def, d.id, ident());
+    report.solids = solidDefs.length;
+    report.solidsClosed = solidDefs.filter((d) => solidInfo(d).closed).length;
+    report.acisNotDrawn = acisND;   // [{reason, what, n}] for cc-acis' notDrawnText
+  }
   return { def, report, units };
+}
+
+/**
+ * One body cc-acis read (positions in drawing units) → its own group: flat faces as one face each with their holes,
+ * curved faces as their triangles with the edges inside a face soft, so only the solid's own edges show. `W` maps a
+ * drawing point to meters. (0.7 D7.25)
+ */
+function acisGroup(model, b, W, type) {
+  const n = b.positions.length / 3, V = new Array(n);
+  for (let i = 0; i < n; i++) {
+    V[i] = W([b.positions[3 * i], b.positions[3 * i + 1], b.positions[3 * i + 2]]);
+    if (!V[i].every((x) => Number.isFinite(x) && Math.abs(x) < 1e7)) throw new Error(t('m3d.io.this_drawing_reaches_more_than_10'));
+  }
+  const T = b.triangles, F = b.faceOf;
+  const polys = [], done = new Set();
+  b.faces.forEach((f, fi) => {
+    if (!f.planar || !f.loops) return;
+    // flat: one face per outer loop, with its holes (meshDef refuses a ring that repeats a corner: then the triangles)
+    const groups = f.loops.map((g) => g.map((r) => r.map(W)));
+    if (groups.every((g) => g.every((r) => r.length >= 3 && new Set(r.map((p) => p.map((x) => Math.round(x * 1e5)).join(','))).size === r.length))) {
+      for (const g of groups) polys.push({ loops: g });
+      done.add(fi);
+    }
+  });
+  for (let i = 0; i < T.length; i += 3) if (!done.has(F[i / 3])) polys.push([V[T[i]], V[T[i + 1]], V[T[i + 2]]]);
+  const d = meshDef(model, polys, model.uniqueName ? model.uniqueName(type) : type, 'group');
+  // the solid's own edges: between two of its faces, or open; every other edge (inside a curved face) soft
+  const vk = (p) => p.map((x) => Math.round(x * 1e5)).join(',');
+  const owner = new Map();
+  for (let i = 0; i < T.length; i += 3) for (let j = 0; j < 3; j++) {
+    const a = vk(V[T[i + j]]), c = vk(V[T[i + (j + 1) % 3]]), kk = a < c ? a + '|' + c : c + '|' + a;
+    const s = owner.get(kk);
+    owner.set(kk, s === undefined ? F[i / 3] : s === F[i / 3] ? s : -1);
+  }
+  const hard = new Set();
+  const twice = new Map();
+  for (let i = 0; i < T.length; i += 3) for (let j = 0; j < 3; j++) {
+    const a = vk(V[T[i + j]]), c = vk(V[T[i + (j + 1) % 3]]), kk = a < c ? a + '|' + c : c + '|' + a;
+    twice.set(kk, (twice.get(kk) || 0) + 1);
+  }
+  for (const [kk, s] of owner) if (s === -1 || twice.get(kk) === 1) hard.add(kk);
+  for (const e of d.edges.values()) {
+    const a = vk(d.verts.get(e.a)), c = vk(d.verts.get(e.b)), kk = a < c ? a + '|' + c : c + '|' + a;
+    if (owner.has(kk) && !hard.has(kk)) e.soft = true;
+  }
+  return d;
 }
 const area2 = (pts) => { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
 function inPoly(p, pts) {

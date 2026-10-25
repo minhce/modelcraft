@@ -34,7 +34,8 @@ fs.mkdirSync(OUT, { recursive: true });
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; if (VERBOSE) console.log('  ok   ' + m); } else { fail++; console.log('  FAIL ' + m); } };
 const close = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol;
-const section = (s) => console.log('\n== ' + s);
+// globalThis.__usdFlush (0.7 XF.9, tools/modelcraft-test/usd.mjs): the models of the section that just ended, saved as USD and reopened
+const section = (s) => { if (globalThis.__usdFlush) globalThis.__usdFlush(); console.log('\n== ' + s); };
 
 // language files (0.4 G): the kernel says every word through t(); load the build's English catalog before anything runs
 const I18N = await import(path.join(APP, 'i18n.js'));
@@ -43,6 +44,8 @@ if (fs.existsSync(LANG_FILE)) I18N.init({ locale: 'en', strings: JSON.parse(fs.r
 const M = await import(path.join(APP, 'model.js'));
 const V = await import(path.join(APP, 'vec.js'));
 const { Model, addEdge, addPolygon, rectPts, ngonPts, pushPull, solidInfo, faceNormal, eraseEdges, transformSel, copySel, faceArea } = M;
+// 0.7 XF.9 (session usd): remember every model this suite builds; at the end each is saved as USD and opened again
+const USD_MODELS = await (await import(path.join(ROOT, 'tools/modelcraft-test/usd.mjs'))).capture(M, APP, ROOT);
 
 const facesFacing = (def, n) => [...def.faces].filter(([, f]) => V.dot(faceNormal(def, f), n) > 1 - 1e-9).map(([id]) => id);
 const connected0 = (def) => M.connected(def, [...def.faces.keys()].slice(0, 1).map((id) => ({ t: 'f', id })));
@@ -361,6 +364,21 @@ section('tools, driven by clicks through a camera');
   T.value('90');
   const im = model.root.insts.get(iid).m;
   ok(close(im[0], 0, 1e-9) && close(im[1], 1, 1e-9), 'rotate tool: 90° about the blue axis turns red into green');
+  // Ctrl in Rotate makes a turned copy (Discord, darkangel 2026-10-24: it only worked in Move), then 3x more around the centre
+  const nRot = model.root.insts.size;
+  T.set('rotate');
+  host.sel = [{ t: 'i', id: iid }];
+  clickAt([6, 0, 0]);
+  ok(T.key('Control') && T.tool.copy, 'rotate tool: Ctrl after the centre switches to copying');
+  clickAt([8, 0, 0]);
+  T.move({ x: at([6, 2, 0])[0], y: at([6, 2, 0])[1] });
+  T.value('90');
+  ok(model.root.insts.size === nRot + 1 && close(model.root.insts.get(iid).m[1], 1, 1e-9), `rotate + Ctrl: a turned copy, the original stays (${model.root.insts.size - nRot} new)`);
+  ok(host.sel.length === 1 && host.sel[0].id !== iid, 'rotate + Ctrl: the copy is selected afterwards');
+  T.value('3x');
+  ok(model.root.insts.size === nRot + 3, `rotated copy, then "3x" → three copies around the centre (${model.root.insts.size - nRot} new)`);
+  model.undo();
+  ok(model.root.insts.size === nRot, 'one undo takes the three rotated copies back');
   // scale by three clicks (the tool started with nothing selected, so no grips: 0.4 M16 grips are tested below)
   host.sel = [];
   T.set('scale');
@@ -393,6 +411,19 @@ section('tools, driven by clicks through a camera');
   ok(onG.kind === 'guide' || onG.kind === 'face', `inference sees the guide line (${onG.kind})`);
   const gpt = at([4, 5, 0]);
   ok(infer(sg, cam, gpt[0] + 2, gpt[1], {}).kind === 'guidept', 'inference snaps to the guide point');
+  // Move + Ctrl: the original stays, so its own corners snap (Discord, darkangel 2026-10-24: a wall copy would not snap to
+  // the corner of the wall it was copied from); a plain move still never snaps to what is moving
+  const rectSel = () => [...[...m2.root.faces.keys()].map((id) => ({ t: 'f', id })), ...[...m2.root.edges.keys()].map((id) => ({ t: 'e', id }))];
+  host.sel = rectSel(); cache = null;
+  T.set('move');
+  clickAt([0, 0, 0], { ctrl: true });
+  moveTo([4, 0, 0]);
+  ok(T.tool.copy && T.tool.lastKind === 'end', `move + Ctrl snaps to a corner of the original (${T.tool.lastKind})`);
+  T.key('Control');
+  moveTo([4, 0, 0]);
+  ok(!T.tool.copy && T.tool.lastKind !== 'end', `Ctrl again (a plain move): its own corner is not a snap (${T.tool.lastKind})`);
+  T.escape();
+  host.sel = [];
 
   // circle + push → cylinder with soft sides
   T.set('circle');
@@ -2040,6 +2071,54 @@ section('outliner: move a group into another, keeping its place (0.4 M22)');
   ok(V.dist(bbA.min, bbA3.min) < 1e-9 && inner.insts.size === 0, 'and back out to the top level, still in the same place');
 }
 
+section('outliner: drag to change the order, or into a group at a place in its list (0.6.1 FIX-061-OUTLINER)');
+{
+  const model = new Model();
+  const mk = (x, name) => model.change('b', (m) => { M.addPolygon(m.root, [[x, 0, 0], [x + 1, 0, 0], [x + 1, 1, 0], [x, 1, 0]], [0, 0, 1]); const f = [...m.root.faces.keys()].at(-1); M.pushPull(m.root, f, 1); const id = m.makeGroup(m.root, [...m.root.faces.keys()].map((i) => ({ t: 'f', id: i })), 'group'); m.def(m.root.insts.get(id).def).name = name; return id; });
+  const a = mk(0, 'A'), b = mk(3, 'B'), c = mk(6, 'C'), box = mk(9, 'Box');
+  const names = (def = model.root) => [...def.insts.values()].map((i) => model.def(i.def).name).join();
+  const where = (id) => { const i = model.root.insts.get(id); return model.bbox(model.def(i.def), i.m); };
+  ok(names() === 'A,B,C,Box', `four groups in the order made (${names()})`);
+  const bbC = where(c);
+  const steps0 = model.undoStack.length;
+  let id = model.change('order', (m) => m.moveTo([], c, [], a, 'before'));
+  ok(id === c && names() === 'C,A,B,Box' && model.undoStack.length === steps0 + 1, `C dropped on A's top edge goes first, keeps its id, one undo step (${names()})`);
+  ok(V.dist(where(c).min, bbC.min) < 1e-9, 'changing the order never moves it in the world');
+  model.change('order', (m) => m.moveTo([], c, [], b, 'after'));
+  ok(names() === 'A,B,C,Box', `C dropped on B's bottom edge goes after B (${names()})`);
+  model.change('order', (m) => m.moveTo([], a, [], null));
+  ok(names() === 'B,C,Box,A', `A dropped on the heading (no row) goes last (${names()})`);
+  model.undo();
+  ok(names() === 'A,B,C,Box', `one undo puts the order back (${names()})`);
+  model.redo(); model.undo();
+  // into a group, at a place in its list
+  let inner = model.def(model.root.insts.get(box).def);
+  const a2 = model.change('in', (m) => m.moveTo([], a, [box]));
+  const b2 = model.change('in', (m) => m.moveTo([], b, [box], a2, 'before'));
+  ok(names() === 'C,Box' && names(inner) === 'B,A', `A dropped into Box, then B onto A's top edge inside Box: Box holds B, A (${names(inner)})`);
+  const bi = model.root.insts.get(box), wb = model.bbox(model.def(inner.insts.get(b2).def), V.mmul(bi.m, inner.insts.get(b2).m));
+  ok(wb.min[0] > 2.99 && wb.min[0] < 3.01, 'B stays where it was in the world');
+  // out again, before C (a drop on C's top edge from inside the box)
+  const steps1 = model.undoStack.length;
+  const b3 = model.change('out', (m) => m.moveTo([box], b2, [], c, 'before'));
+  ok(names() === 'B,C,Box' && names(inner) === 'A' && model.undoStack.length === steps1 + 1 && model.root.insts.has(b3), `B dragged out of Box onto C's top edge: B, C, Box in one step (${names()})`);
+  model.undo();
+  inner = model.def(model.root.insts.get(box).def);   // undo swaps in the definitions it put back
+  ok(names() === 'C,Box' && names(inner) === 'B,A', 'one undo takes it back into Box, in its place');
+  model.redo();
+  inner = model.def(model.root.insts.get(box).def);
+  // the order is kept in the file
+  const m2 = new Model(); m2.load(JSON.parse(JSON.stringify(model.toJSON())));
+  ok([...m2.root.insts.values()].map((i) => m2.def(i.def).name).join() === 'B,C,Box', 'the order is saved in the .modelcraft file and back on open');
+  let msg = '';
+  try { model.moveTo([], box, [box, [...inner.insts.keys()][0]]); } catch (err) { msg = err.message; }
+  ok(/cannot go inside itself/.test(msg) && names() === 'B,C,Box', 'into a group inside itself: refused, nothing changes');
+  msg = '';
+  try { model.change('x', (m) => m.moveTo([], c, [], 999)); } catch (err) { msg = err.message; }
+  ok(msg && names() === 'B,C,Box', 'before a row that is not there: refused, nothing changes');
+  ok(model.reorder(model.root, c, c) === false && model.reorder(model.root, b3, c, 'before') === false, 'onto itself or where it already is: nothing moves');
+}
+
 section('scenes remember what is hidden (0.4 M23)');
 {
   const model = new Model();
@@ -2521,6 +2600,10 @@ section('beginner 3D and print prep: firstmodel.js + printprep.js (0.6 LC.21)');
     ...Object.keys(PP.BEDS).map((k) => 'set.printbed.' + k), 'set.printbed.none', 'ui.hint.guide', 'ui.views.guide'].filter((k) => !(k in EN));
   ok(!missing.length, 'every print prep, guide and bed string is in en.json' + (missing.length ? ': missing ' + missing : ''));
 }
+// 0.7 LC.21 (session print-07): supports preview, wall thickness, hollow, repair — tools/modelcraft-test/print07.mjs
+await (await import(path.join(ROOT, 'tools/modelcraft-test/print07.mjs'))).run({ ok, close, section, APP });
+// 0.7 kernel-print: mergeCoplanar keeps every face (print-07 § Found 1), print results as solids — tools/modelcraft-test/kernel-print.mjs
+await (await import(path.join(ROOT, 'tools/modelcraft-test/kernel-print.mjs'))).run({ ok, close, section, APP });
 section('push/pull to a face\'s level (0.5 DR.4, Discord)');
 {
   // tangentsoft's model (2026-10-14): a box, a circle on top pulled up into a post, its top offset inward, the inner face
@@ -2730,6 +2813,41 @@ section('push/pull flush keeps the outline (0.6 DR.4, the owner\'s choice)');
     clickAt([0.5, 0.5, 2]);
     check(m, 'the tool, pulled up to the top around it');
   }
+}
+
+// 0.7 Track MD (session mesh): the mesh kind and its operators — shared with CadCraft's m3d copy (bin/test-cadcraft-3d.mjs)
+{
+  const { run } = await import(path.join(ROOT, 'tools/modelcraft-test/mesh.mjs'));
+  await run({ ok, close, section, APP });
+}
+// 0.7 ModelCraft drawing tools (session mesh): MC-DIVIDE, MC-CALC
+{
+  const { run } = await import(path.join(ROOT, 'tools/modelcraft-test/tools07.mjs'));
+  await run({ ok, close, section, APP });
+}
+
+// 0.7 XF.1 (session interchange): glTF 2.0 complete — io/gltf-read.js, gltf-import.js (onto meshes), gltf-write.js
+{
+  const { run } = await import(path.join(ROOT, 'tools/modelcraft-test/gltf.mjs'));
+  await run({ ok, close, section, APP });
+}
+
+// 0.7 XF.3 (session interchange): OBJ + MTL with textures, PLY and STL with colour, Alembic caches in — io/{obj,ply,stl,abc}.js
+{
+  const { run } = await import(path.join(ROOT, 'tools/modelcraft-test/meshfiles.mjs'));
+  await run({ ok, close, section, APP });
+}
+
+// 0.7 XF.6 (session interchange): FBX import, clean room (docs/spikes/fbx-reader.md) — io/fbx-parse.js, fbx-import.js, tga.js
+{
+  const { run } = await import(path.join(ROOT, 'tools/modelcraft-test/fbx.mjs'));
+  await run({ ok, close, section, APP });
+}
+
+// 0.7 XF.9 + XF.2 (session usd): USD save / open / import — usd-modelcraft.js on cc-usd (dev/usd/, a copy of lib/usd)
+{
+  const { run } = await import(path.join(ROOT, 'tools/modelcraft-test/usd.mjs'));
+  await run({ ok, close, section, APP, ROOT, models: USD_MODELS });
 }
 
 section('language files (0.4 G)');

@@ -3,7 +3,7 @@ title: Open, save, import and export
 summary: The ModelCraft file, what you can bring in and send out, where files go, and what changes offline and between browsers.
 section: start
 order: 30
-keywords: open, save, import, export, file, skp, recover, autosave, recent, desktop, open in 3d, handoff, download, modelcraft file, dae, collada, obj, gltf, glb, stl, ifc, dwg, dxf, formats, offline, save as
+keywords: open, save, import, export, file, 3dm, skp, recover, autosave, recent, desktop, open in 3d, handoff, download, modelcraft file, dae, collada, obj, gltf, glb, stl, step, stp, ifc, dwg, dxf, formats, offline, save as
 ---
 
 ModelCraft reads and writes files on your computer. Nothing is uploaded: a file you open is read inside your browser, and a file you save is a download. See [Where your files go](common:your-files).
@@ -13,11 +13,17 @@ ModelCraft reads and writes files on your computer. Nothing is uploaded: a file 
 | Format | Open | Import | Export | What it is for |
 |---|---|---|---|---|
 | ModelCraft (`.modelcraft`) | yes | no | {{ui:Save}} | Your working file. Keeps everything. |
+| USD (`.usd`, `.usda`, `.usdc`, `.usdz`) | yes | yes | {{ui:Save as}}, {{ui:Export}} | Rendering and scene-assembly programs. ModelCraft's own USD keeps everything. See [Save, open and export USD](topic:usd). |
 | SketchUp (`.skp`) | no | yes | no | Bringing in models from SketchUp. Keeps groups, components, colors, textures on faces, tags and soft edges. See [Bring in an SKP model](topic:import-sketchup-files). |
 | Collada (`.dae`) | no | yes | yes | Trading models with other 3D modelers. Keeps groups, components and colors. |
 | OBJ (`.obj`) | no | yes | yes | Rendering and visualization programs. |
 | glTF (`.glb`, `.gltf`) | no | yes | `.glb` only | Web viewers, game engines, AR. |
-| STL (`.stl`) | no | no | yes | 3D printing (in millimeters). |
+| STL (`.stl`) | no | yes | yes | 3D printing (in millimeters). |
+| PLY (`.ply`) | no | yes | yes | Meshes with colors: scans, color printing. |
+| FBX (`.fbx`) | no | yes | no | Models from animation and game programs (FBX 2011 and newer). |
+| Alembic (`.abc`) | no | yes | no | Geometry caches, at their first sample. |
+| STEP (`.step`, `.stp`) | no | yes | no | Parts from part modelers and suppliers, as closed meshes at their true size. See [File formats](topic:formats). |
+| `.3dm` | no | yes | no | NURBS models: polysurfaces, meshes, curves, blocks and layers, as meshes, edges, components and tags. See [Bring in a .3dm model](topic:import-3dm-files). |
 | 3MF (`.3mf`) | no | no | yes | 3D printing, with colors (in millimeters). From {{ui:Check for 3D printing (STL or 3MF)…}}: see [Get a model ready for 3D printing](topic:print-3d). |
 | IFC (`.ifc`) | no | no | yes | BIM programs, and BimCraft. |
 | DWG (`.dwg`) | no | yes | yes | A site plan or floor plan to model on; sending the model to a CAD program. |
@@ -49,7 +55,7 @@ Click {{ui:Save}} or press {{key:Mod+S}}. The browser downloads `<name>.modelcra
 In the desktop app, {{ui:Save}} writes the file you opened in place. A new model asks where to save it.
 :::
 
-- There is no Save As. To give a new model a name, rename the downloaded file. The next save after you open the renamed file uses the new name.
+- {{ui:Save as}} ({{key:Mod+Shift+S}}) saves a copy as a `.modelcraft` file or as [USD](topic:usd); where the browser can, it asks for the name and the place. Otherwise rename the downloaded file: the next save after you open the renamed file uses the new name.
 - Each save is a new download. Depending on the browser's settings, it goes straight to your downloads folder or asks where to save. If a file with that name is already there, most browsers add a number, such as `Untitled (1).modelcraft`.
 
 :::chromium
@@ -81,7 +87,7 @@ In the CadCraft drafting app, **View**, then **More**, then **Open in ModelCraft
 Importing adds a file to the model you have open; it does not replace it.
 
 1. Click {{ui:Import}} in the {{ui:File}} group, or drop the file on the 3D view.
-2. Pick a Collada, OBJ, glTF, DWG or DXF file.
+2. Pick a SketchUp, Collada, OBJ, glTF, FBX, PLY, STL, Alembic, STEP, `.3dm`, USD, DWG or DXF file.
 
    The file arrives as **one group**, selected, and the view zooms to show it. The status bar says what came in, and lists anything it could not import, such as "Not imported: 2 texture".
 
@@ -96,7 +102,7 @@ Some things to know:
 ## Export
 
 1. Click {{ui:Export}} in the {{ui:File}} group.
-2. Choose a format: {{ui:glTF binary (.glb)}}, {{ui:Collada (.dae)}}, {{ui:OBJ (.obj)}}, {{ui:STL for printing (.stl, millimeters)}}, {{ui:IFC for BimCraft (.ifc)}}, {{ui:DWG for CAD (.dwg, 2004)}} or {{ui:DXF for CAD (.dxf, R12)}}.
+2. Choose a format: {{ui:glTF binary (.glb)}}, {{ui:Collada (.dae)}}, {{ui:OBJ (.obj)}}, {{ui:STL for printing (.stl, millimeters)}}, {{ui:PLY with colours (.ply)}}, {{ui:USD (.usda, .usdc, .usdz)…}}, {{ui:IFC for BimCraft (.ifc)}}, {{ui:DWG for CAD (.dwg, 2004)}} or {{ui:DXF for CAD (.dxf, R12)}}.
 
 The browser downloads the file, named like the model. The whole model is exported, not just the selection. An empty model is not exported: "The model is empty: draw something first." See [Export a model for other programs](topic:export-model).
 
@@ -107,7 +113,7 @@ Everything in ModelCraft runs on your computer, so modeling, opening, saving, im
 To open ModelCraft with no connection at all, save it for offline use while you are online:
 
 1. Click {{ui:Save for offline}} in the app bar at the top.
-2. The button counts up ("Saving 40 of 212") while it saves. ModelCraft saves its own files (its DWG reader among them), this help and the 3D library, so it can take a minute.
+2. The button counts up ("Saving 40 of 212") while it saves. ModelCraft saves its own files (its DWG reader among them), this help and the 3D library, so it can take a while.
 3. When the button reads {{ui:Offline ready}}, ModelCraft opens from the same address with no connection, and DWG import works offline too.
 
 Click {{ui:Offline ready}} later for {{ui:Save again (get the newest version)}} or {{ui:Remove the offline copy}}. If the button reads {{ui:Could not save}}, some files did not download: check the connection and click it to try again. {{ui:Offline not available}} means this browser window cannot keep a copy (private windows and some managed computers). See [Working offline](common:offline).
@@ -121,9 +127,9 @@ You are offline. You can keep modeling and saving. Unless the app bar shows {{ui
 ## Desktop app
 
 :::desktop
-Desktop builds of ModelCraft are not available yet. This help describes ModelCraft in the browser.
+You are using ModelCraft in CadCraft Studio, the desktop app with all eight apps. Files open and save where you choose.
 :::
 
 :::web
-Desktop builds are not available yet. ModelCraft runs in the browser on Mac, Windows and Linux.
+ModelCraft runs in the browser on Mac, Windows and Linux, and in CadCraft Studio, the desktop app with all eight apps in one install, from getcadcraft.com/download.
 :::

@@ -34,8 +34,13 @@ import { sceneOf, warmScene, angleLayout, formatDeg } from './infer.js';
 import { Tools, TOOL_NAMES, TOOL_KEYS } from './tools.js';
 import { View3D } from './view3d.js';
 import { pngName } from './viewimage.js';
-import { formatLength, formatArea, formatVolume, parseLength, localeUnits } from './units.js';
-import { exportGLB, exportOBJ, exportMTL, exportSTL, exportIFC, exportDAE, exportDXF, toDwgModel, importOBJ, importGLTF, importDXF, importDWG, importDAE } from './io.js';
+import { formatLength, formatArea, formatVolume, parseLength, localeUnits, UNIT_LABELS } from './units.js';
+import { defaultUnit, limitSelect, onUnitsChange } from './unit-prefs.js';   // 0.7 UNITS: Settings › General › Units
+import { exportIFC, exportDAE, exportDXF, toDwgModel, importDXF, importDWG, importDAE } from './io.js';
+import { exportObj } from './io/obj.js';      // 0.7 XF.3: OBJ + MTL with textures (io/; io.js's OBJ stays for the m3d copies)
+import { exportStl } from './io/stl.js';
+import { exportPly } from './io/ply.js';
+import { exportGltf } from './io/gltf-write.js';   // 0.7 XF.1: glTF with mesh UVs, textures, lamps and cameras (io/; io.js's exportGLB stays for the m3d copies)
 import { dynamicSummary } from './dwg-dynamic.js';   // 0.5 DB.11 (a byte-identical copy of BimCraft's)
 import { sunPosition } from './sun.js';
 import { ident, dist, add, sub, mul, dot, cross, norm } from './vec.js';
@@ -47,12 +52,29 @@ import { getHost } from "./host.js";
 import { installAgents } from './agents.js';
 import { Autosave } from "./app-autosave.js";
 import { handoffParam, takeHandoff } from './handoff.js';
-import { MATERIALS, CATEGORIES, material as libMat, planarUV } from './render/materials.js';   // 0.5 RC.7: the material library
+import { MATERIALS, CATEGORIES, material as libMat, planarUV, onMaterialsChanged } from './render/materials.js';
+import { decalMeshes } from './decals-mc.js';   // 0.7 MT.6   // 0.5 RC.7: the material library
 import { libMaterial, swatchPixels, imageTexture, imageMaterial as imgMaterial } from './render/three-mats.js';
 import { mountTimeline } from './timeline.js';   // 0.6 LC.10: the animation timeline (render/anim.js)
 import { mountXrMc } from './xr-mc.js';   // 0.6 LC.19: review in a headset (xr/), the Issues list
 import { action3d, wheelFactor } from './input-mouse.js';
+import { mountMachineCard, benchParam, openBench } from './compute-mc.js';   // 0.7 CU.1: Settings › Rendering › Your machine; CU.8: ?bench=render
 import { GUIDE_STEPS, guideStep } from './firstmodel.js';   // 0.6 LC.21: the guided first model   // 0.5 IP.3: the menu style's buttons and wheel (input-modelcraft.js)
+import { getWorkspace, listWorkspaces, toolbarGroups, switcher as wsSwitcher, MODEL_GROUPS, workspaceOfCmd } from './workspaces.js';   // 0.7: Model · Mesh · …
+import './mesh/edit-tool.js';   // 0.7 MD.2: the meshedit tool (registers itself into tools.js)
+import './ws-mesh.js';   // 0.7 MD.2: the Mesh workspace (registers itself)
+import './ws-uv.js';   // 0.7 MD.5: the UV workspace (registers itself)
+import './mesh/curve-tool.js';   // 0.7 MD.6: the curve edit tool (registers itself)
+import './mesh/sculpt-tool.js';   // 0.7 MD.7: the sculpt tool (registers itself)
+import './ws-sculpt.js';   // 0.7 MD.7: the Sculpt workspace (registers itself)
+import { materials as fileMaterials, attachShading } from './ws-shading.js';   // 0.7 MT.1: the Shading workspace (registers itself) and the file's node materials
+import { toMesh as curveToMesh, textCurve } from './ws-curve.js';   // 0.7 MD.6: the Curve workspace (registers itself)
+import './ws-render.js';   // 0.7 RN.11: the Render workspace (registers itself)
+import { curvePanel } from './mesh/curve-panel.js';
+import { ModEval, cleanMods, cleanLattice, cleanCurve, makeLattice, worldOf, VIEW_FACES } from './mesh/mod-eval.js';   // 0.7 MD.3: what a mesh with modifiers shows
+import { modPanel } from './mesh/mod-panel.js';
+import { setMeshHooks } from './model.js';
+import { Mesh } from './mesh.js';
 const { t } = i18n;
 /** The display unit in words, lower case ("feet and inches", "millimeters"). */
 const unitWords = (u) => t('app.unit.' + String(u).replace('-', '_'));
@@ -83,15 +105,32 @@ function init(root) {
 
   const model = new Model();
   const cam = new Camera();
+  // 0.7 MT.1: the file's node materials (ws-shading.js): pictures from model.images; an edit is an unsaved change (outside undo, like images)
+  attachShading({ model, onEdit: () => { model.dirty = true; model.bumpSafe(); } });
+  // 0.7 MD.3: modifier stacks are evaluated here (small ones at once, big ones in compute's pool, booleans with manifold-3d)
+  const modEval = new ModEval(model, {
+    onReady: () => { view.builtFor = null; view.invalidate(); scheduleInfo(); },
+    pool: () => import('./compute/runtime.js').then((r) => r.pagePool()),
+    manifold: () => import('./solids.js').then((L) => L.manifold()),
+    jobUrl: new URL('./mesh/mod-job.js', import.meta.url).href,
+  });
+  modEval.onNote = (n) => print(t('app.mod.note.' + n));
+  // MD.4: the view's subdivision budget follows the machine's tier (Settings › Rendering › Your machine)
+  import('./compute-mc.js').then((c) => c.machine()).then(({ info }) => import('./compute/probe.js').then((P) => modEval.setBudget(VIEW_FACES[P.TIER_DEFAULTS[info.tier]?.realtime] || 0))).catch(() => {});
+  setMeshHooks({ clean: cleanMods, cleanLattice, cleanCurve, shown: (d) => modEval.shown(d), rendered: (d) => modEval.rendered(d), lines: (d) => modEval.lines(d) });
   let fileName = t('app.file.untitled');
   let renderSettings = null;   // 0.5 RC.11: the Render dialog's settings (render/looks.js cleanSettings shape), kept in the file's view
+  let scatterSets = [];        // 0.7 RT.5 (session realtime): the live view's scatter sets (rt/rt-scatter.js), kept in the file's view
   let presentation = false;   // 0.4 M28: only the model on screen (no axes, guides, marks or selection)
   let sceneIndex = -1;
   let timeline = null, videoSettings = null, xrmc = null;   // 0.6 LC.10: the animation timeline (mounted below) and the Render video dialog's choices
   let playing = null;
+  let wsId = 'model', wsHost = null;   // 0.7: the open workspace (workspaces.js) and what it is given
   // a new model's unit comes from the browser's locale (feet and inches in the US, Liberia and
   // Myanmar, millimeters elsewhere); the picker changes it for this model and the file keeps it
-  const newUnits = () => localeUnits((navigator.languages && navigator.languages[0]) || navigator.language || '');
+  // (0.7 UNITS: or the length unit starred in Settings › General › Units, when ModelCraft has it)
+  const MC_UNITS = Object.keys(UNIT_LABELS);   // the model units ModelCraft has (ids as in the shared table)
+  const newUnits = () => defaultUnit('length', { offer: MC_UNITS, fallback: localeUnits((navigator.languages && navigator.languages[0]) || navigator.language || '') });
   model.units = newUnits();
 
   // ---- host for the tools ----
@@ -125,10 +164,15 @@ function init(root) {
     changed() { scheduleInfo(); view.invalidate(); warmPicking(); },
     openContext(path) {
       if (!model.context(path)) return;
+      if (model.context(path).def.curve) { wsHost.meshPath = path; setWorkspace('curve'); return; }   // 0.7 MD.6: a curve object opens in the Curve workspace
+      if (model.context(path).def.mesh) { wsHost.meshPath = path; setWorkspace('mesh'); return; }   // 0.7 MD.2: a mesh opens in the Mesh workspace
       host.path = path; host.sel = []; tools.set(tools.name === 'place' ? 'select' : tools.name);
       print(t('app.ctx.editing', { name: model.context(path).def.name }));
       scheduleInfo(); view.invalidate();
     },
+    meshEdit(state) { view.setMeshEdit(state); },   // 0.7 MD.2: what the mesh edit tool draws
+    curveEdit(state) { view.setCurveEdit(state); },   // 0.7 MD.6: what the curve edit tool draws
+    settle() { view.settle(); },
     closeContext() {
       if (!host.path.length) return;
       const leaving = host.path[host.path.length - 1];
@@ -148,9 +192,17 @@ function init(root) {
   const axisIcon = mountAxisIcon(ui.stage, { getView: cubeOpts.getView, i18n: { t: i18n.t, has: i18n.has } });
   { const draw0 = view.draw.bind(view); view.draw = () => { draw0(); viewCube.update(); axisIcon.update(); }; }
   window.modelcraft = { model, cam, tools, view, host, ui, viewCube, axisIcon, cubeView: cubeOpts.getView, presenting: () => presentation,
-    afterHistory: () => afterHistory(), print: (m) => print(m), get timeline() { return timeline; }, get xrmc() { return xrmc; } };   // Studio Live (0.5 LV.22, live.js): redraw after others' edits, its messages
+    afterHistory: () => afterHistory(), print: (m) => print(m), get timeline() { return timeline; }, get xrmc() { return xrmc; },
+    setWorkspace: (id) => setWorkspace(id), get workspace() { return wsId; },   // 0.7: workspaces (tests, the console)
+    get fileName() { return fileName; }, get sceneIndex() { return sceneIndex; }, goScene: (i) => goScene(i) };   // 0.7 WS.9: the layouts' adapter (workspace-modelcraft.js)
+  let layouts = null;   // 0.7 WS.9: the shell's workspace layouts, once mounted (bottom of init)   // Studio Live (0.5 LV.22, live.js): redraw after others' edits, its messages
   // ---- AI assistants and scripts (0.4 part 2 X.7, session agents; agents.js on host.js's control channel): off until Settings › Assistants ----
-  installAgents({ model, changed: () => host.changed(), canvas: () => view.renderer?.domElement || null, draw: () => view.draw() });
+  installAgents({ model, changed: () => host.changed(), canvas: () => view.renderer?.domElement || null, draw: () => view.draw(),
+    // 0.7 AS.5 (session assistants): scenes as the Scenes panel saves and shows them
+    scene: () => ({ cam: cam.toJSON(), style: view.style, vis: model.captureVis() }), goScene: (i) => goScene(i, false, { quiet: true }), scenesChanged: () => renderScenes(),
+    file: () => JSON.parse(modelText()), base: () => base(),   // 0.7 AS.6: usd_export
+    // 0.7 AS.6 (assistants-gaps): render_still / render_queue get the Render dialog's own hooks (as kind === 'render' opens it)
+    render: async () => { const { mcScene } = await import('./render-mc.js'); return { scene: (s) => mcScene(model, cam, view.style, s), viewSize: () => ({ w: ui.gl.clientWidth, h: ui.gl.clientHeight }), settings: () => renderSettings, fileBase: base, download: (blob, name) => download(blob, name, blob.type || 'application/octet-stream'), appName: 'ModelCraft' }; } });
 
   // ---- settings (Settings › ModelCraft; per viewer conveniences only) ----
   const SET_DEFAULTS = { keys: 'sketchup', scroll: 'auto', touch2: 'pan', snap: true, collide: true, corner: 'cube', bed: '' };
@@ -171,6 +223,8 @@ function init(root) {
   const persist = () => { try { localStorage.setItem('modelcraft.settings', JSON.stringify(settings)); } catch { /* fine */ } };
   window.modelcraft.settings = settings;
   const settingsDlg = document.querySelector('[data-app-settings]');
+  mountMachineCard(settingsDlg);
+  if (benchParam()) openBench();   // 0.7 CU.8: the render bench (/lab/modelcraft?bench=render)
   const blender = () => settings.keys === 'blender';
   function applySettings() {
     tools.snapping = settings.snap;
@@ -260,7 +314,7 @@ function init(root) {
 
   // tooltips and hints follow the key style
   // tool titles in Blender style (app.btitle.<tool>); the SketchUp ones are ui.inc's
-  const BLENDER_TITLES = Object.fromEntries(['select', 'line', 'rect', 'circle', 'polygon', 'push', 'move', 'rotate', 'scale', 'erase', 'tape', 'dim', 'orbit', 'pan', 'zoom', 'extents', 'component', 'group'].map((k) => [k, t('app.btitle.' + k)]));
+  const BLENDER_TITLES = Object.fromEntries(['select', 'line', 'rect', 'circle', 'polygon', 'push', 'move', 'rotate', 'scale', 'erase', 'tape', 'dim', 'orbit', 'pan', 'zoom', 'extents', 'component', 'group', 'divide'].map((k) => [k, t('app.btitle.' + k)]));
 
   const kb = (t) => el('kbd', {}, t);
   const HINTS = {
@@ -317,11 +371,14 @@ function init(root) {
 
   // ---- tools: buttons and pressed state ----
   const setTool = (name, arg) => {
+    // 0.7: Model's tools work in the Model workspace (the others bring their own)
+    if (wsId !== 'model' && name !== 'select') { print(t('app.ws.model_tool', { ws: t(getWorkspace(wsId).labelKey) })); return; }
     tools.set(name, arg);
     for (const b of root.querySelectorAll('[data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === name));
     ui.over.classList.toggle('is-select', name === 'select' || name === 'erase');
     ui.over.classList.toggle('is-orbit', name === 'orbit' || name === 'pan');
     if (name !== 'select') hideHint();
+    layouts?.refresh();
   };
   root.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => { setTool(b.dataset.tool); ui.over.focus({ preventScroll: true }); }));
   setTool('select');
@@ -371,7 +428,7 @@ function init(root) {
     return b;
   };
   const colorName = (name) => t('app.color.' + name.toLowerCase().replace(/\s+/g, '_'));
-  colorLabel = (c) => { if (isMaterialPaint(c)) return libMat(c.slice(4)) ? t('render.mat.' + c.slice(4)) : c.slice(4); if (isImagePaint(c)) { const im = model.images.get(c.slice(4, c.indexOf('|'))); return t('app.color.image', { name: im?.name || '?' }); } const p = c && PALETTE.find(([, h]) => h === c); return !c ? t('app.color.default') : p ? colorName(p[0]) : c; };
+  colorLabel = (c) => { if (isMaterialPaint(c)) { const m = libMat(c.slice(4)); return m ? (m.node ? m.name || c.slice(4) : t('render.mat.' + c.slice(4))) : c.slice(4); } if (isImagePaint(c)) { const im = model.images.get(c.slice(4, c.indexOf('|'))); return t('app.color.image', { name: im?.name || '?' }); } const p = c && PALETTE.find(([, h]) => h === c); return !c ? t('app.color.default') : p ? colorName(p[0]) : c; };
   palette.append(swatch(null, t('app.color.default'), 'is-default'), ...PALETTE.map(([name, c]) => swatch(c, colorName(name))));
   const customIn = el('input', { type: 'color', value: '#5a8f6a', 'aria-label': t('app.color.other'), dataset: { paintCustom: '' } });
   const customSw = el('span', { className: 'mc-swatch is-custom', role: 'radio', 'aria-checked': 'false', title: t('app.color.other') }, el('i', { className: 'bi bi-plus-lg', 'aria-hidden': 'true' }), customIn);
@@ -396,8 +453,34 @@ function init(root) {
       return m;
     },
     uv: planarUV,
+    tile: (key) => { const m = key.startsWith('mat:') && libMat(key.slice(4)); return m ? (m.node ? m.size : m.tex?.size) || null : null; },   // 0.7 MT.1: mesh UVs × the tile
   };
+  view.decals = (def, path) => decalMeshes(model, def, path, view.textures.material);   // 0.7 MT.6: decals (session `materials`)
   const matlib = root.querySelector('[data-matlib]');
+  // 0.7 MT.1: the file's own node materials (Shading workspace) first, then the library; they repaint as their graphs change
+  const mineRow = el('div', { className: 'mc-palette mc-matrow', dataset: { matlibMine: '' } }), mineHead = el('p', { className: 'mc-matcat' }, t('shading.palette.mine'));
+  matlib.prepend(mineHead, mineRow);
+  const fillMine = () => {
+    swatches.splice(0, swatches.length, ...swatches.filter((sw) => !sw.mine));
+    mineRow.replaceChildren(...fileMaterials.list().map((m) => {
+      const b = swatch('mat:' + m.id, m.graph.name || m.id, 'is-mat'), e = libMat(m.id);
+      swatches[swatches.length - 1].mine = true;
+      if (e) {
+        b.style.background = e.color;
+        const px = swatchPixels(m.id, 40);
+        if (px) { const c = document.createElement('canvas'); c.width = px.w; c.height = px.h; c.getContext('2d').putImageData(new ImageData(px.data, px.w, px.h), 0, 0); b.style.backgroundImage = 'url(' + c.toDataURL() + ')'; }
+      }
+      return b;
+    }));
+    mineHead.hidden = mineRow.hidden = !fileMaterials.size;
+    markPaint(tools.paintColor);
+  };
+  onMaterialsChanged(() => {
+    for (const [k, v] of [...texMats]) if (!v && k.startsWith('mat:')) texMats.delete(k);   // a material that did not exist yet when asked
+    view.builtFor = null; view.invalidate();
+    clearTimeout(fillMine.t); fillMine.t = setTimeout(fillMine, 150);
+  });
+  fillMine();
   const pending = [];
   for (const cat of CATEGORIES) {
     const list = MATERIALS.filter((m) => m.cat === cat);
@@ -511,9 +594,10 @@ function init(root) {
   }, true);
 
   function hideHint() { ui.hint.hidden = true; }
+  ui.hint.querySelector('[data-hint-close]')?.addEventListener('click', () => { hideHint(); focusView?.(); });   // the start card's X, as CadCraft's
 
   // ---- pointer input ----
-  const pos = (e) => { const r = ui.over.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const pos = (e) => { const r = ui.over.getBoundingClientRect(); return e.pointerType === 'pen' ? { x: e.clientX - r.left, y: e.clientY - r.top, pen: true, pressure: e.pressure } : { x: e.clientX - r.left, y: e.clientY - r.top }; };   // a pen's pressure: MD.7 sculpting
   const mods = (e) => ({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey, button: e.button, time: e.timeStamp });
   let camDrag = null;
   const touches = new Map();
@@ -760,6 +844,8 @@ function init(root) {
   };
   ui.over.addEventListener('wheel', (e) => {
     e.preventDefault();
+    // 0.7 MD.2: an operation that counts (bevel segments, loop cuts, spin steps) takes the wheel while it runs
+    if (tools.tool.op?.wheel && !e.ctrlKey && Math.abs(e.deltaY) > 0 && tools.tool.op.wheel(e.deltaY < 0 ? 1 : -1)) return;
     if (!e.ctrlKey && looksLikePad(e)) {
       const k = e.deltaMode === 1 ? 16 : 1;
       if (e.shiftKey) cam.pan(-e.deltaX * k, -e.deltaY * k);
@@ -781,7 +867,7 @@ function init(root) {
   }, { passive: false });
 
   // ---- keyboard ----
-  const VCB_START = /^[0-9.,\-'"[<*/]$/;
+  const VCB_START = /^[0-9.,\-'"[<*/(]$/;   // ( starts a calculation too (0.7 MC-CALC)
   const typing = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
   const busyTransform = () => tools.tool.busy && ['move', 'rotate', 'scale', 'push'].includes(tools.name);
   const cursorEv = () => ({ ...(host.mouse || { x: view.w / 2, y: view.h / 2 }), shift: false, ctrl: false, alt: false });
@@ -798,10 +884,12 @@ function init(root) {
     const ctrl = e.ctrlKey || e.metaKey;
     const k = e.key, l = k.length === 1 ? k.toLowerCase() : k;
     const B = blender();
+    // 0.7: the open workspace's own keys come first (the Mesh workspace: 1/2/3, G/R/S, E, Ctrl+B …)
+    if (wsId !== 'model') { const w = getWorkspace(wsId); if (w?.keydown?.(e, wsHost)) { e.preventDefault(); scheduleInfo(); view.invalidate(); return; } }
     if (ctrl) {
       if (l === 'z' && !e.shiftKey) { e.preventDefault(); act('undo'); return; }
       if (l === 'y' || (l === 'z' && e.shiftKey)) { e.preventDefault(); act('redo'); return; }
-      if (l === 's') { e.preventDefault(); act('save'); return; }
+      if (l === 's') { e.preventDefault(); act(e.shiftKey ? 'saveas' : 'save'); return; }
       if (l === 'o') { e.preventDefault(); act('open'); return; }
       if (l === 'a') { e.preventDefault(); selectAll(); return; }
       if (l === 'c') { e.preventDefault(); act('copy'); return; }
@@ -929,12 +1017,156 @@ function init(root) {
 
   // ---- actions ----
   root.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => act(b.dataset.act)));
+
+  // ---- workspaces (0.7: Model · Mesh · …; workspaces.js, each ws-<id>.js registers itself) ----
+  const toolbarEl = root.querySelector('.mc-tools');
+  toolbarEl.prepend(wsSwitcher(el, t, 'model'));
+  const wsSelect = toolbarEl.querySelector('[data-workspace]');
+  {
+    const editG = [...toolbarEl.querySelectorAll(':scope > .mc-tool-group')].find((g) => g.getAttribute('aria-label') === 'Edit');   // i18n-ignore: ui.inc's group key
+    for (const w of listWorkspaces()) if (!w.builtin) for (const g of toolbarGroups(w, el, t)) toolbarEl.insertBefore(g, editG || null);
+  }
+  toolbarEl.querySelectorAll('[data-cmd]').forEach((b) => b.addEventListener('click', () => {
+    const w = getWorkspace(workspaceOfCmd(b.dataset.cmd));
+    if (w && w.id === wsId) { w.command?.(b.dataset.cmd, wsHost); scheduleInfo(); view.invalidate(); }
+    focusView();
+  }));
+  /** Put a mesh in the open group (in front of the view, on the ground there), one undo step. → its placement's path. */
+  function placeMesh(mesh, name, { curve = null, label = null } = {}) {   // MD.6: a curve object carries `curve`
+    const base = wsHost.parentPath && model.context(wsHost.parentPath) ? wsHost.parentPath : host.path.filter(() => true);
+    const ctx = model.context(base) || model.context([]);
+    const at = cam.target ? [cam.target[0], cam.target[1], 0] : [0, 0, 0];
+    const local = [ctx.inv[0] * at[0] + ctx.inv[4] * at[1] + ctx.inv[8] * at[2] + ctx.inv[12], ctx.inv[1] * at[0] + ctx.inv[5] * at[1] + ctx.inv[9] * at[2] + ctx.inv[13], ctx.inv[2] * at[0] + ctx.inv[6] * at[1] + ctx.inv[10] * at[2] + ctx.inv[14]];
+    const iid = model.change(label || t('app.mesh.undo.add'), (m) => { const d = m.newMeshDef(mesh, name); if (curve) d.curve = curve; return m.place(m.context(base).def, d.id, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, local[0], local[1], local[2], 1]); });
+    return [...base, iid];
+  }
+  /**
+   * A curve object from a drawn arc, circle, polygon or curve (MD.6): its control points (a drawn curve's own, else the
+   * points along it) as a Bézier (a polygon: straight), placed where it is; the drawn lines stay. One undo step.
+   */
+  function curveObjectFrom(cid, ci) {
+    const def = model.context(host.path).def;
+    const sp = ci.kind === 'curve' && def.splines.has(cid) ? def.splines.get(cid) : null;
+    let pts = (sp ? sp.pts : ci.verts.map((v) => def.verts.get(v))).map((p) => p.slice());
+    const closed = sp ? !!sp.closed : ci.closed;
+    if (closed && !sp && pts.length > 2 && dist(pts[0], pts[pts.length - 1]) < 1e-9) pts = pts.slice(0, -1);
+    // flat on the ground plane: a flat curve, its plane at z = 0 of its own placement
+    const z0 = pts[0][2], flat = pts.every((p) => Math.abs(p[2] - z0) < 1e-9);
+    if (flat) pts = pts.map((p) => [p[0], p[1], 0]);
+    const spline = { type: ci.kind === 'polygon' ? 'poly' : 'bezier', cyclic: closed, resolution: 12, order: 4, points: pts.map((p) => ({ p, hl: p.slice(), hr: p.slice(), h: 'auto', w: 1, radius: 1, tilt: 0 })) };
+    const curve = { dim: flat ? '2d' : '3d', fill: false, extrude: 0, bevel: { depth: Math.max(1e-4, ci.length / 100), resolution: 4 }, caps: true, taper: [1], splines: [spline] };
+    const name = t('app.curve.kind.' + (closed && ci.round ? 'bezier-circle' : 'bezier'));
+    model.change(t('app.curve.undo.add'), (m) => {
+      const d = m.newMeshDef(new Mesh(), name);
+      d.curve = curve;
+      m.place(m.context(host.path).def, d.id, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, flat ? z0 : 0, 1]);
+    });
+    print(t('app.curve.made_from', { n: pts.length }));
+    scheduleInfo(); view.invalidate();
+  }
+  /** What a curve object's settings work through (mesh/curve-panel.js); `selPoints` from the Curve workspace's tool. */
+  function curveCtx(id, selPoints = []) {
+    const redraw = () => { view.builtFor = null; if (tools.name === 'curveedit') tools.tool.show(); scheduleInfo(); view.invalidate(); };
+    const change = (label, fn) => { model.change(label, (m) => { const d = m.def(id), next = structuredClone(d.curve); fn(next); d.curve = next; }, [id]); redraw(); };
+    return {
+      def: model.def(id), el, t, units: model.units, formatLength, parseLength, print, selPoints, change,
+      async text(str) {
+        const c = model.def(id)?.curve;
+        if (!c?.text || !str) return;
+        const made = await textCurve(wsHost, str, c.text.height, c.text.weight);
+        if (made) change(t('app.curve.undo.text'), (cv) => { cv.splines = made.splines; cv.text = made.text; });
+      },
+    };
+  }
+  /** What the Modifiers section of a mesh's panel works through (mesh/mod-panel.js), for definition id. */
+  function modCtx(id) {
+    const def = model.def(id);
+    const redraw = () => { view.builtFor = null; scheduleInfo(); view.invalidate(); };
+    return {
+      def, model, el, t, units: model.units, formatLength, parseLength, print, info: modEval.infoOf(def),
+      change(label, fn) { model.change(label, (m) => fn(m.def(id)), [id]); redraw(); },
+      apply(i) {
+        const d = model.def(id), r = modEval.now(d, { upTo: i });
+        try {
+          model.meshEdit(id, t('app.mod.undo.apply'), (me, dd) => {
+            const all = [];
+            for (let f = 0; f < me.nf; f++) if (!me.faceDead(f)) all.push(f);
+            if (all.length) me.removeFaces(all);
+            me.appendMesh(r.mesh);
+            dd.mods = dd.mods.slice(i + 1);
+            dd.curve = null;   // a curve object (MD.6) becomes the mesh it made
+          });
+        } catch (e) { print(e.message); return; }
+        print(t('app.mod.applied'));
+        redraw();
+      },
+      addLattice(i) {
+        const d = model.def(id), W = worldOf(model, id);
+        if (!W) return;
+        const { mesh: cage, lattice } = makeLattice(d.mesh, [3, 3, 3]);
+        model.change(t('app.mod.undo.lattice'), (m) => {
+          const c = m.newMeshDef(cage, t('app.mod.lattice.name'));
+          c.lattice = lattice;
+          m.place(m.root, c.id, W);
+          const dd = m.def(id), next = structuredClone(dd.mods);
+          next[i].params.cage = c.id;
+          dd.mods = next;
+        });
+        print(t('app.mod.lattice.made'));
+        redraw();
+      },
+    };
+  }
+  wsHost = {
+    model, cam, view, el, t, print, settings, ask, askText, placeMesh, meshPath: null, parentPath: null, modPanel: (id) => modPanel(modCtx(id)),
+    curvePanel: (id, selPoints) => curvePanel(curveCtx(id, selPoints)),
+    get tools() { return tools; }, get path() { return host.path; }, get sel() { return host.sel; }, get units() { return model.units; },
+    setPath(p) { host.path = p.slice(); host.sel = []; scheduleInfo(); view.invalidate(); },
+    selectPlacement(p) { if (!p.length) return; host.path = p.slice(0, -1); host.setSel(model.context(p) ? [{ t: 'i', id: p[p.length - 1] }] : []); },
+    setWorkspace: (id) => setWorkspace(id),
+    get renderSettings() { return renderSettings; }, saveRenderSettings: (s) => { renderSettings = s; },   // 0.7 RN.11: shared with the Render dialog
+    renderPanel: () => scheduleInfo(),
+    cursor: () => cursorEv(),
+    tip: (s) => host.tip?.(s), changed: () => host.changed(), get stage() { return view.gl.parentElement; },   // 0.7 MD.5: the UV editor
+    choosePaint: (c, name) => choosePaint(c, name),   // 0.7 MT.1: the Shading workspace's Paint with it
+    // 0.7 MT.3: a library material dropped on the view paints the face or group under the pointer (as a Paint click), one undo step
+    paintAt(cx, cy, c, name) {
+      const r = ui.over.getBoundingClientRect(), s = tools.pickAt({ x: cx - r.left, y: cy - r.top, shift: false, ctrl: false, alt: false });
+      if (!s || (s.t !== 'f' && s.t !== 'i')) return false;
+      const def = model.context(host.path).def;
+      model.change(t('app.undo.paint'), () => { if (s.t === 'f') paintFaces(def, [s.id], c); else paintInstance(def, s.id, c); }, [def.id]);
+      host.changed(); print(t('shading.lib.dropped', { name })); view.invalidate();
+      return true;
+    },
+    get viewEl() { return ui.over; },
+    download: (bytes, name, type) => download(bytes, name, type),   // 0.7 MT.4: MaterialX export
+  };
+  /** Open workspace `id` (Model's own groups hide in the others; the workspace's show). → false when it refused. */
+  function setWorkspace(id) {
+    const to = getWorkspace(id);
+    if (!to || id === wsId) { wsSelect.value = wsId; return !!to && id === wsId; }
+    if (tools.tool.busy) tools.escape();
+    getWorkspace(wsId)?.exit?.(wsHost);
+    wsId = id;
+    root.dataset.activeWorkspace = id;
+    for (const g of toolbarEl.querySelectorAll(':scope > .mc-tool-group')) {
+      if (g.dataset.workspaceGroup) g.hidden = g.dataset.workspaceGroup !== id;
+      else if (MODEL_GROUPS.includes(g.getAttribute('aria-label'))) g.hidden = id !== 'model';
+    }
+    wsSelect.value = id;
+    if (to.enter && to.enter(wsHost) === false) { wsId = 'model'; return setWorkspace('model') && false; }
+    if (id === 'model') { tools.set('select'); for (const b of root.querySelectorAll('[data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === 'select')); }
+    scheduleInfo(); view.invalidate(); layouts?.refresh();
+    return true;
+  }
+  wsSelect.addEventListener('change', () => { setWorkspace(wsSelect.value); focusView(); });
   async function act(name) {
     closeMenus();
     switch (name) {
       case 'new': if (await confirmDiscard()) newModel(); break;
-      case 'open': if (await confirmDiscard()) { const [f] = await fileHost.openFile({ types: MODEL_TYPES }).catch((err) => { print(t('app.open.failed', { error: err.message })); return []; }); await openFromHost(f, { asked: true }); } break;
+      case 'open': if (await confirmDiscard()) { const [f] = await fileHost.openFile({ types: OPEN_TYPES }).catch((err) => { print(t('app.open.failed', { error: err.message })); return []; }); await openFromHost(f, { asked: true }); } break;
       case 'save': saveModel(); break;
+      case 'saveas': saveAs(); break;   // 0.7 XF.9: .modelcraft or USD
       case 'import': { const [f] = await fileHost.openFile({ types: IMPORT_TYPES }).catch((err) => { print(t('app.open.failed', { error: err.message })); return []; }); if (f) await importFile(f); break; }
       case 'undo': tools.escape(); { const l = model.undo(); print(l ? t('app.undid', { what: l }) : t('app.undo.nothing')); } afterHistory(); break;
       case 'redo': tools.escape(); { const l = model.redo(); print(l ? t('app.redid', { what: l }) : t('app.redo.nothing')); } afterHistory(); break;
@@ -1096,6 +1328,53 @@ function init(root) {
       print(t(kind === 'group' ? 'app.group.done' : 'app.component.done', { name: d.name }));
     }
   }
+  // ---- meshes (0.7 MD.1) ----
+  /** Entity info for a mesh placement: its counts and size, Convert to geometry, Explode, Make unique. */
+  function meshInfo(d, inst, iid, counts, { row, btn, notes, u }) {
+    const src = d.curve ? d.shown : d.mesh, I = src.info();   // a curve object (MD.6): what it makes
+    row(t('app.info.mesh.faces'), String(I.faces));
+    row(t('app.info.mesh.verts'), String(I.verts));
+    row(t('app.info.mesh.edges'), String(I.edges));
+    row(t('app.info.solid'), I.closed ? t('app.yes') : t('app.no'));
+    const m = inst.m, k = Math.cbrt(Math.abs(m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2])));
+    if (I.closed) row(t('app.info.volume'), formatVolume(I.volume * k * k * k, u));
+    const bb = src.bounds();
+    const sc = [0, 1, 2].map((q) => Math.hypot(m[q * 4], m[q * 4 + 1], m[q * 4 + 2]));
+    if (bb) [t('app.info.width'), t('app.info.depth'), t('app.info.height')].forEach((lb, q) => row(lb, formatLength((bb.max[q] - bb.min[q]) * sc[q], u)));
+    if (!I.closed && I.boundary) notes.push(el('p', { className: 'mc-note' }, t('app.info.mesh.open', { n: I.boundary })));
+    if (d.curve) {
+      btn(t('app.info.curve.edit'), () => { wsHost.meshPath = [...host.path, iid]; setWorkspace('curve'); });
+      btn(t('app.info.curve.to_mesh'), () => { curveToMesh(wsHost, d.id); scheduleInfo(); view.invalidate(); });
+    }
+    btn(t('app.info.mesh.to_geometry'), () => {
+      const id = model.change(t('app.undo.mesh_to_geometry'), (mm) => mm.fromMesh(d.id));
+      print(t('app.mesh.to_geometry.done', { name: model.def(id)?.name || '' }));
+      scheduleInfo(); view.invalidate();
+    });
+    btn(t('app.info.explode'), explodeSel);
+    if ((counts.get(d.id) || 0) > 1) btn(t('app.info.make_unique'), () => { model.change(t('app.info.make_unique'), (mm) => mm.makeUnique(mm.context(host.path).def, iid), [model.context(host.path).def.id]); scheduleInfo(); });
+    if (d.curve) notes.push(curvePanel(curveCtx(d.id)));   // 0.7 MD.6
+    if (!d.lattice) notes.push(modPanel(modCtx(d.id)));   // 0.7 MD.3
+  }
+  /** Turn the selected group or component into a mesh (every placement of it), one undo step. */
+  function convertToMesh(iid) {
+    let r;
+    try { r = model.change(t('app.undo.to_mesh'), (mm) => mm.toMesh(mm.context(host.path).def, iid)); } catch (e) { print(e.message); return; }
+    const I = model.def(r.def).mesh.info();
+    print(t('app.mesh.convert.done', { faces: I.faces, verts: I.verts }) + (r.loose ? ' ' + t('app.mesh.convert.loose', { n: r.loose }) : ''));
+    scheduleInfo(); view.invalidate();
+  }
+
+  /** Entity info › Divide… (0.7 MC-DIVIDE): ask how many parts (works with no keyboard shortcut, on a tablet too). */
+  async function divideAsk() {
+    const txt = await askText(t('app.divide.h'), t('app.divide.label'), '2');
+    if (txt === null || txt === undefined) return;
+    const n = Number(String(txt).trim().replace(/^\//, '').replace(/s$/i, ''));
+    if (!Number.isInteger(n) || n < 2 || n > 1000) { print(t('m3d.model.divide_count', { max: 1000 })); return; }
+    tools.divideSel(n);
+    scheduleInfo(); view.invalidate();
+  }
+
   function explodeSel() {
     const insts = host.sel.filter((s) => s.t === 'i');
     if (!insts.length) { print(t('app.explode.none')); return; }
@@ -1278,6 +1557,7 @@ function init(root) {
   function goScene(i, animate = true, { ms = 650, quiet = false, force = false } = {}) {
     const s = model.scenes[i];
     if (!s) return Promise.resolve();
+    layouts?.scene(i);   // 0.7 WS.9: a layout's view tab follows (it keeps the free camera first)
     sceneIndex = i;
     view.style = JSON.parse(JSON.stringify(s.style));
     styleToUi();
@@ -1450,7 +1730,7 @@ function init(root) {
   let infoTimer = 0;
   // Toolbar and menu availability: a button that cannot do anything right now is greyed out
   const NEEDS_SEL = new Set(['copy', 'cut', 'duplicate', 'delete', 'hide', 'isolate', 'group', 'component', 'select-none', 'intersect-sel', 'terrain-contours',
-    'flip-x', 'flip-y', 'flip-z', 'flipcopy-x', 'flipcopy-y', 'flipcopy-z', 'solid-union', 'solid-subtract', 'solid-intersect']);
+    'flip-x', 'flip-y', 'flip-z', 'flipcopy-x', 'flipcopy-y', 'flipcopy-z', 'solid-union', 'solid-intersect']);   // Subtract picks its two pieces in turn: no selection needed
   function renderToolbar() {
     const def = model.root, empty = !(def.edges.size || def.faces.size || def.insts.size || model.dims.size || model.guides.size);
     const sel = host.sel, has = (...ts) => sel.some((x) => ts.includes(x.t));
@@ -1466,33 +1746,102 @@ function init(root) {
       else if (a === 'axes-face') b.disabled = !(sel.length === 1 && sel[0].t === 'f');
       else if (NEEDS_SEL.has(a)) b.disabled = !sel.length;
     }
+    // 0.7: a workspace's own buttons, off with the reason in their title
+    for (const b of root.querySelectorAll('[data-cmd]')) {
+      const w = getWorkspace(workspaceOfCmd(b.dataset.cmd));
+      if (!w || w.id !== wsId || !wsHost) continue;
+      const st = w.toolState?.(b.dataset.cmd, wsHost) || { ok: true };
+      b.disabled = !st.ok;
+      b.dataset.why = st.ok ? '' : st.why || '';
+      if (st.pressed !== undefined) b.setAttribute('aria-pressed', String(!!st.pressed)); else b.removeAttribute('aria-pressed');
+    }
   }
   window.addEventListener('storage', (e) => { if (e.key === 'modelcraft.clipboard') scheduleInfo(); });
   // the panels wait while a tool previews (a drag): they show the model once it is put down, not on every frame
-  function scheduleInfo() { if (!infoTimer) infoTimer = requestAnimationFrame(() => { infoTimer = 0; if (model.previewing) return; renderToolbar(); renderInfo(); renderTree(); renderComps(); renderTags(); renderScenesIfChanged(); renderLights(); }); }
+  function scheduleInfo() { if (!infoTimer) infoTimer = requestAnimationFrame(() => { infoTimer = 0; if (model.previewing) return; renderToolbar(); renderInfo(); renderTree(); renderComps(); renderTags(); renderScenesIfChanged(); renderLights(); layouts?.refresh(); }); }
   let scenesSeen = '';
   function renderScenesIfChanged() { const k = JSON.stringify(model.scenes.map((s) => [s.name, !!s.lock])) + sceneIndex; if (k !== scenesSeen) { scenesSeen = k; renderScenes(); } }
 
-  // Outliner (0.4 M22): search by name, an eye per row (hide/show, M17), F2 renames in place, drag a row onto a group to
-  // move it inside (onto the Outliner heading: to the top level), keeping where it is in the world
-  let treeFilter = '', dragFrom = null;
+  // Outliner (0.4 M22): search by name, an eye per row (hide/show, M17), F2 renames in place. Drag a row (0.6.1): onto the
+  // middle of a group's row = inside it, onto a row's top or bottom edge = just before / after it (the order), onto the
+  // Outliner heading = the top level, last; each drop one undo step, keeping where it is in the world. Pointer events, not
+  // HTML drag and drop: a desktop web view's own file-drop handling (Studio on macOS) swallows HTML drops (FIX-061-OUTLINER).
+  let treeFilter = '', treeDrag = null, treeClickEat = false;
   ui.treeSearch.addEventListener('input', () => { treeFilter = ui.treeSearch.value.trim().toLowerCase(); renderTree(); });
   ui.treeSearch.addEventListener('keydown', (e) => { if (e.key === 'Escape') { ui.treeSearch.value = ''; treeFilter = ''; renderTree(); } });
-  function moveRow(to) {
-    const f = dragFrom;
-    dragFrom = null;
-    if (!f) return;
+  /** Move the placement f {parent, iid} into the group open at `to`, before/after `ref` (null: last) — one undo step. */
+  function moveRow(f, to, ref = null, where = 'before') {
+    if (!f) return false;
+    const same = f.parent.join() === to.join();
     let nid2;
-    try { nid2 = model.change(t('app.undo.tree_move'), (m) => m.moveInto(f.parent, f.iid, to), [model.context(f.parent).def.id, model.context(to).def.id]); }
-    catch (err) { print(err.message); return; }
-    if (nid2 === f.iid && f.parent.join() === to.join()) return;
+    try { nid2 = model.change(t(same ? 'app.undo.tree_order' : 'app.undo.tree_move'), (m) => m.moveTo(f.parent, f.iid, to, ref, where), [model.context(f.parent).def.id, model.context(to).def.id]); }
+    catch (err) { print(err.message); return false; }
     host.path = to.slice(); host.setSel([{ t: 'i', id: nid2 }]);
-    print(to.length ? t('app.tree.moved_in', { name: model.def(model.context(to).def.insts.get(nid2).def).name, group: model.context(to).def.name }) : t('app.tree.moved_top', { name: model.def(model.root.insts.get(nid2).def).name }));
+    const name = model.def(model.context(to).def.insts.get(nid2).def).name;
+    print(same ? t('app.tree.reordered', { name }) : to.length ? t('app.tree.moved_in', { name, group: model.context(to).def.name }) : t('app.tree.moved_top', { name }));
     afterHistory();
+    return true;
   }
-  ui.treeTop.addEventListener('dragover', (e) => { if (dragFrom) { e.preventDefault(); ui.treeTop.classList.add('is-drop'); } });
-  ui.treeTop.addEventListener('dragleave', () => ui.treeTop.classList.remove('is-drop'));
-  ui.treeTop.addEventListener('drop', (e) => { e.preventDefault(); ui.treeTop.classList.remove('is-drop'); moveRow([]); });
+  /** Where a drag at (x, y) would drop: {to, ref, where, el, cls} or null (not over the Outliner, or onto itself / inside itself). */
+  function treeTarget(x, y, f = treeDrag?.from) {
+    const hitEl = document.elementFromPoint(x, y);
+    if (!f || !hitEl) return null;
+    if (ui.treeTop.contains(hitEl)) return { to: [], ref: null, where: 'before', el: ui.treeTop, cls: 'is-drop' };
+    const row = hitEl.closest('.mc-node');
+    if (!row || !ui.tree.contains(row)) return ui.tree.contains(hitEl) || hitEl === ui.tree ? { to: [], ref: null, where: 'before', el: ui.treeTop, cls: 'is-drop' } : null;
+    const p = row.dataset.path.split('.').map(Number), iid = p[p.length - 1], parent = p.slice(0, -1);
+    const mine = [...f.parent, f.iid];
+    if (mine.every((v, i) => p[i] === v) && p.length > mine.length) return null;   // a row inside the dragged one
+    const b = row.getBoundingClientRect(), rel = (y - b.top) / Math.max(1, b.height);
+    const isSelf = p.length === mine.length && mine.every((v, i) => p[i] === v);
+    if (rel < 0.3 || rel > 0.7 || isSelf) {
+      if (isSelf) return null;
+      return { to: parent, ref: iid, where: rel < 0.5 ? 'before' : 'after', el: row, cls: rel < 0.5 ? 'is-drop-before' : 'is-drop-after' };
+    }
+    return { to: p, ref: null, where: 'before', el: row, cls: 'is-drop' };
+  }
+  function treeMark(tg) {
+    for (const x of root.querySelectorAll('.is-drop, .is-drop-before, .is-drop-after')) x.classList.remove('is-drop', 'is-drop-before', 'is-drop-after');
+    if (tg) tg.el.classList.add(tg.cls);
+  }
+  function treeDragEnd(commit, e) {
+    const d = treeDrag;
+    treeDrag = null;
+    if (!d) return;
+    clearTimeout(d.timer);
+    root.classList.remove('mc-tree-dragging');
+    if (!d.on) return;
+    const tg = commit && e ? treeTarget(e.clientX, e.clientY, d.from) : null;
+    treeMark(null);
+    treeClickEat = true; setTimeout(() => { treeClickEat = false; }, 0);   // the click after a drag is not a select
+    if (tg) moveRow(d.from, tg.to, tg.ref, tg.where);
+  }
+  function treeDragStart(e, from) {
+    if (e.button !== 0 || treeFilter) return;   // a filtered list hides rows: no drops between what can't be seen
+    const touch = e.pointerType === 'touch';
+    treeDrag = { from, id: e.pointerId, x: e.clientX, y: e.clientY, on: false, touch, el: e.currentTarget, timer: 0 };
+    // a finger scrolls the list: a drag starts after holding still for a moment
+    if (touch) treeDrag.timer = setTimeout(() => { if (treeDrag && !treeDrag.on) { treeDrag.on = true; root.classList.add('mc-tree-dragging'); try { navigator.vibrate?.(15); } catch { /* none */ } } }, 450);
+  }
+  window.addEventListener('pointermove', (e) => {
+    const d = treeDrag;
+    if (!d || e.pointerId !== d.id) return;
+    if (!d.on) {
+      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5) return;
+      if (d.touch) { treeDrag = null; clearTimeout(d.timer); return; }   // moved before the hold: it was a scroll
+      d.on = true; root.classList.add('mc-tree-dragging');
+      try { d.el.setPointerCapture(e.pointerId); } catch { /* gone */ }
+    }
+    e.preventDefault();
+    treeMark(treeTarget(e.clientX, e.clientY));
+  }, true);
+  window.addEventListener('pointerup', (e) => { if (treeDrag && e.pointerId === treeDrag.id) treeDragEnd(true, e); }, true);
+  window.addEventListener('pointercancel', (e) => { if (treeDrag && e.pointerId === treeDrag.id) treeDragEnd(false); }, true);
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && treeDrag?.on) { e.preventDefault(); e.stopPropagation(); treeDragEnd(false); } }, true);
+  // while a finger drags a row, the list must not scroll under it
+  ui.tree.addEventListener('touchmove', (e) => { if (treeDrag?.on) e.preventDefault(); }, { passive: false });
+  ui.tree.addEventListener('contextmenu', (e) => { if (treeDrag) e.preventDefault(); });
+  ui.tree.addEventListener('click', (e) => { if (treeClickEat) { e.stopPropagation(); e.preventDefault(); } }, true);
   function renameRow(btn, d) {
     const nm = btn.querySelector('.nm');
     const inp = el('input', { type: 'text', className: 'mc-input mc-tree-name', value: d.name, maxLength: 120, 'aria-label': t('app.info.name') });
@@ -1540,18 +1889,14 @@ function init(root) {
         const off = inst.hidden || (inst.tag && offTags.has(inst.tag));   // hidden itself (M17), or by its tag (M6)
         const btn = el('button', {
           type: 'button', className: 'mc-node' + (isSel ? ' is-sel' : '') + (open ? ' is-open' : '') + (off ? ' is-hidden' : '') + (treeFilter && own ? ' is-match' : ''),
-          title: t('app.tree.title'), draggable: true,
+          title: t('app.tree.title'), dataset: { path: p.join('.') },
           onclick: () => { host.path = path; host.setSel([{ t: 'i', id: iid }]); },
           ondblclick: () => host.openContext(p),
         }, el('i', { className: 'bi bi-' + (d.kind === 'component' ? 'boxes' : 'collection'), 'aria-hidden': 'true' }),   // i18n-ignore: an icon class
         el('span', { className: 'nm' }, d.name + (d.kind === 'component' && counts.get(d.id) > 1 ? ' (' + counts.get(d.id) + ')' : '')),
         off && !inst.hidden ? el('span', { className: 'mc-hidden-tag', title: t('app.tree.hidden_tag', { name: inst.tag }) }, el('i', { className: 'bi bi-tag', 'aria-hidden': 'true' }), el('span', { className: 'visually-hidden' }, ' ' + t('app.tree.hidden_tag', { name: inst.tag }))) : null);
         btn.addEventListener('keydown', (e) => { if (e.key === 'F2') { e.preventDefault(); e.stopPropagation(); renameRow(btn, d); } });
-        btn.addEventListener('dragstart', (e) => { dragFrom = { parent: path.slice(), iid }; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', d.name); });
-        btn.addEventListener('dragend', () => { dragFrom = null; for (const x of root.querySelectorAll('.is-drop')) x.classList.remove('is-drop'); });
-        btn.addEventListener('dragover', (e) => { if (dragFrom && !(dragFrom.iid === iid && dragFrom.parent.join() === path.join())) { e.preventDefault(); btn.classList.add('is-drop'); } });
-        btn.addEventListener('dragleave', () => btn.classList.remove('is-drop'));
-        btn.addEventListener('drop', (e) => { e.preventDefault(); btn.classList.remove('is-drop'); moveRow(p); });
+        btn.addEventListener('pointerdown', (e) => treeDragStart(e, { parent: path.slice(), iid }));
         // the eye: hide or show this placement (Edit › More › Hide does the same)
         const eye = el('button', { type: 'button', className: 'mc-eye', 'aria-pressed': String(!inst.hidden), title: t(inst.hidden ? 'app.tree.show' : 'app.tree.hide', { name: d.name }), 'aria-label': t(inst.hidden ? 'app.tree.show' : 'app.tree.hide', { name: d.name }),
           onclick: () => { model.change(t(inst.hidden ? 'app.undo.unhide' : 'app.undo.hide'), (m) => hideSel(m.context(path).def, [{ t: 'i', id: iid }], !inst.hidden), [model.context(path).def.id]); host.setSel(host.sel.filter((s) => s.id !== iid)); afterHistory(); } },
@@ -1706,6 +2051,18 @@ function init(root) {
   }
 
   function renderInfo() {
+    // 0.7: another workspace draws its own panel here
+    if (wsId !== 'model' && wsHost) {
+      const w = getWorkspace(wsId);
+      w.changed?.(wsHost);
+      if (wsId !== 'model' && w.renderPanel) {
+        const box = el('div', { className: 'mc-ws-panel', dataset: { wsPanel: w.id } });
+        const h = w.renderPanel(wsHost, box);
+        ui.infoH.textContent = h || t(w.labelKey);
+        ui.info.replaceChildren(box);
+        return;
+      }
+    }
     const u = model.units;
     const ctx = model.context(host.path) || model.context([]);
     const def = ctx.def, sel = host.sel;
@@ -1761,6 +2118,8 @@ function init(root) {
       row(t('app.info.length'), formatLength(ci.length, u));
       if (ci.kind === 'curve' && def.splines.has(cid)) { row(t('app.info.points'), String(def.splines.get(cid).pts.length)); btn(t('app.info.edit_points'), () => { tools.set('curve', { edit: cid }); syncTool(); ui.over.focus({ preventScroll: true }); }); }
       if (ci.round && !ci.flat) notes.push(el('p', { className: 'mc-note' }, t('app.info.radius.fixed')));
+      btn(t('app.info.divide'), divideAsk);   // 0.7 MC-DIVIDE
+      btn(t('app.info.curve.object'), () => curveObjectFrom(cid, ci));   // 0.7 MD.6
       ui.info.replaceChildren(props, ...notes, actions);
       return;
     }
@@ -1774,11 +2133,12 @@ function init(root) {
       ui.infoH.textContent = t('app.info.edge');
       if (e) lenBox(t('app.info.length'), 'mc-edgelen', dist(def.verts.get(e.a), def.verts.get(e.b)), (L) => model.change(t('app.undo.edge_length'), (m) => m.setEdgeLength(host.path, sel[0].id, L), [model.context(host.path).def.id]));
       if (e) notes.push(el('p', { className: 'mc-note' }, t('app.info.edge.note')));
+      if (e) btn(t('app.info.divide'), divideAsk);   // 0.7 MC-DIVIDE
     } else if (sel.length === 1 && nI === 1) {
       const inst = def.insts.get(sel[0].id), d = inst && model.def(inst.def);
       if (d) {
         const counts = model.instanceCounts();
-        ui.infoH.textContent = d.kind === 'component' ? t('app.info.component') : t('app.info.group');
+        ui.infoH.textContent = d.mesh ? t('app.info.mesh') : d.kind === 'component' ? t('app.info.component') : t('app.info.group');
         // a part inside an open component: how it follows when the component is stretched (0.4 M26)
         if (host.path.length && def.kind === 'component') partRules(props, def, sel[0].id);
         row(t('app.info.color'), colorLabel(inst.color));
@@ -1787,7 +2147,9 @@ function init(root) {
         const inp = el('input', { type: 'text', id: 'mc-defname', className: 'mc-input', value: d.name, maxLength: 120 });
         inp.addEventListener('change', () => { const v = inp.value.trim().slice(0, 120); if (v && v !== d.name) model.change(t('app.scene.rename'), (m) => { m.def(d.id).name = v; }, [d.id]); scheduleInfo(); });
         props.append(inp);
-        if (d.kind === 'component') row(t('app.info.placed'), t('app.info.placed.n', { n: counts.get(d.id) || 0 }));
+        if (d.kind === 'component' || (d.mesh && (counts.get(d.id) || 0) > 1)) row(t('app.info.placed'), t('app.info.placed.n', { n: counts.get(d.id) || 0 }));
+        if (d.mesh) meshInfo(d, inst, sel[0].id, counts, { row, btn, notes, u });
+        else {
         const s = solidInfo(d);
         row(t('app.info.solid'), s.closed && !d.insts.size ? t('app.yes') : t('app.no'));
         if (s.closed && !d.insts.size) {
@@ -1811,6 +2173,8 @@ function init(root) {
         btn(t('app.info.explode'), explodeSel);
         if (d.kind === 'component' && (counts.get(d.id) || 0) > 1) btn(t('app.info.make_unique'), () => { model.change(t('app.info.make_unique'), (m) => m.makeUnique(m.context(host.path).def, sel[0].id), [model.context(host.path).def.id]); scheduleInfo(); });
         if (d.kind === 'group') btn(t('app.undo.make_component'), () => { model.change(t('app.undo.make_component'), (m) => { const dd = m.def(d.id); dd.kind = 'component'; dd.name = m.uniqueName(t('app.info.component')); }, [d.id]); scheduleInfo(); });
+        btn(t('app.info.mesh.convert'), () => convertToMesh(sel[0].id));
+        }
       }
     } else if (sel.length === 1 && nD === 1) {
       const dm = model.dims.get(sel[0].id), id = sel[0].id;
@@ -1903,7 +2267,10 @@ function init(root) {
   }
 
   // ---- units ----
-  ui.units.value = model.units;
+  // the picker lists the units turned on in Settings › General › Units, and always the model's own (0.7 UNITS)
+  function showUnits() { limitSelect(ui.units, 'length', { keep: [model.units] }); ui.units.value = model.units; }
+  showUnits();
+  onUnitsChange(showUnits);
   ui.units.addEventListener('change', () => {
     model.units = ui.units.value;
     print(t(model.units === 'ft-in' ? 'app.units.set.ftin' : 'app.units.set', { unit: unitWords(model.units) }));
@@ -1917,7 +2284,7 @@ function init(root) {
     tools.escape();
     model.reset();
     model.units = newUnits();
-    ui.units.value = model.units;
+    showUnits();
     host.path = []; host.sel = [];
     fileName = t('app.file.untitled');
     saveTarget = null;
@@ -1925,10 +2292,12 @@ function init(root) {
     sceneIndex = -1;
     view.style = { ...view.style, mode: 'shaded', edges: true, shadows: false };
     renderSettings = null;
+    scatterSets = [];
     videoSettings = null;
     timeline.reset();
     xrmc.reset();
     model.images.clear();
+    fileMaterials.load(null);   // 0.7 MT.1
     styleToUi();
     cam.eye = [9, -12, 8]; cam.target = [0, 0, 1];
     setTool('select');
@@ -1940,16 +2309,22 @@ function init(root) {
   const fileHost = getHost({ app: 'modelcraft' });
   let saveTarget = null;   // the HostFile the open model came from, when Save can write it in place
   const MODEL_TYPES = [{ description: t('app.file.type.model'), extensions: ['.modelcraft'] }];
-  const IMPORT_TYPES = [{ description: t('app.file.type.import'), extensions: ['.skp', '.dae', '.obj', '.glb', '.gltf', '.dwg', '.dxf'] }];
+  // 0.7 XF.9: USD opens as the model too (Open) and is a choice in Save as — never the default (owner, 2026-10-20)
+  const OPEN_TYPES = [...MODEL_TYPES, { description: t('usd.file.type'), extensions: ['.usd', '.usda', '.usdc', '.usdz'] }];
+  const IMPORT_TYPES = [{ description: t('app.file.type.import'), extensions: ['.skp', '.dae', '.obj', '.glb', '.gltf', '.dwg', '.dxf', '.ply', '.stl', '.abc', '.fbx', '.usd', '.usda', '.usdc', '.usdz', '.step', '.stp', '.3dm'] }];
   const download = (bytes, name, type) => fileHost.download(bytes instanceof Blob || typeof bytes === 'string' ? bytes : new Blob([bytes], { type }), name, type);
-  const base = () => fileName.replace(/\.(modelcraft|json)$/i, '') || t('app.file.untitled');
+  const base = () => fileName.replace(/\.(modelcraft|json|usd|usda|usdc|usdz)$/i, '') || t('app.file.untitled');
   const modelText = () => {
     // the file keeps the current camera and style for next time, outside the undo history
     const j = model.toJSON();
     j.view = { cam: cam.toJSON(), style: view.style };
     const imgs = model.imagesJSON();
+    for (const id of fileMaterials.pictureIds()) if (model.images.has(id) && !imgs.some((x) => x.id === id)) imgs.push({ id, ...model.images.get(id) });   // 0.7 MT.1: pictures a material reads
     if (imgs.length) j.images = imgs;   // 0.5 RC.11 (b): imported textures, beside the model (outside undo)
+    const mats = fileMaterials.toJSON();
+    if (mats) j.materials = mats;   // 0.7 MT.1: the file's node materials, beside the model (outside undo, like images)
     if (renderSettings) j.view.render = renderSettings;   // 0.5 RC.11: the Render dialog's settings and looks
+    if (scatterSets.length) j.view.scatter = scatterSets;   // 0.7 RT.5: scatter sets (cleaned by rt/rt-scatter.js cleanScatter on use)
     if (videoSettings) j.view.video = videoSettings;   // 0.6 LC.10: the Render video dialog's choices
     const an = timeline && timeline.toJSON();
     if (an) j.anim = an;   // 0.6 LC.10: the animation (render/anim.js; checked again on open)
@@ -1957,6 +2332,34 @@ function init(root) {
     if (iss) j.issues = iss;   // 0.6 LC.19: issues (placed in VR), pictures as base64 PNG; checked again on open
     return JSON.stringify(j);
   };
+  let usdOpenNote = '';
+  /** Save as (0.7 XF.9): .modelcraft (what Save writes), or USD as text, binary or a package — nothing lost either way. */
+  async function saveAs(usdOnly = false) {
+    tools.escape();
+    const choices = [['usda', t('usd.dialog.format.usda'), 'btn-line'], ['usdc', t('usd.dialog.format.usdc'), 'btn-line'], ['usdz', t('usd.dialog.format.usdz'), 'btn-line']];
+    if (!usdOnly) choices.unshift(['modelcraft', t('usd.format.modelcraft'), 'btn-plot']);
+    const c = await ask({ title: usdOnly ? t('usd.dialog.title') : t('usd.save_as.h'), text: t('usd.save_as.text'), buttons: [['cancel', t('app.btn.cancel'), 'btn-line'], ...choices] });
+    if (!c || c === 'cancel') return false;
+    if (c === 'modelcraft') {
+      const name = base() + '.modelcraft';
+      const r = await fileHost.save({ target: null, data: modelText(), name, types: MODEL_TYPES });
+      if (!r.ok) { if (!r.cancelled) print(t('app.save.failed', { error: String(r.error?.message || r.error || '') })); return false; }
+      if (r.target?.writable) saveTarget = r.target;
+      model.dirty = false; adoc.clean();
+      print(r.how === 'written' ? t('app.save.written', { file: r.path || r.name || name }) : t('app.save.downloaded', { file: name }));
+      return true;
+    }
+    try {
+      const { saveUsd } = await import('./usd-modelcraft.js');
+      const out = saveUsd(JSON.parse(modelText()), model, { format: c, name: base() + '.modelcraft' });
+      const name = base() + '.' + c;
+      const type = c === 'usda' ? 'model/vnd.usda' : c === 'usdz' ? 'model/vnd.usdz+zip' : 'application/octet-stream';
+      const r = await fileHost.save({ target: null, data: typeof out.data === 'string' ? out.data : new Blob([out.data], { type }), name, types: [{ description: t('usd.file.type'), extensions: ['.' + c] }] });
+      if (!r.ok) { if (!r.cancelled) print(t('app.save.failed', { error: String(r.error?.message || r.error || '') })); return false; }
+      print(t('usd.done', { name: r.path || r.name || name, n: out.report.objects }));
+      return true;
+    } catch (err) { print(t('app.save.failed', { error: String(err?.message || err) })); return false; }
+  }
   async function saveModel() {
     tools.escape();
     const name = base() + '.modelcraft';
@@ -1970,11 +2373,23 @@ function init(root) {
   }
   // spikes (0.5): menu items that show only with ?spike=<name> in the address (lab experiments, never on by default)
   { const sp = new URLSearchParams(location.search).get('spike'); root.querySelectorAll('[data-spike]').forEach((b) => { b.hidden = b.dataset.spike !== sp; }); }
+  let liveView = null;   // 0.7 RT.3 (session realtime): the live view, one at a time
   root.querySelectorAll('[data-export]').forEach((b) => b.addEventListener('click', async () => {
     closeMenus();
     tools.escape();
     const kind = b.dataset.export;
     try {
+      if (kind === 'live' || kind === 'live-window') {
+        // the model in the real-time look beside the view, following edits (rt/rt-view.js; ModelCraft's adapter rt/rt-mc.js)
+        const [{ openLiveView }, { mcLive }, { pagePool }] = await Promise.all([import('./rt/rt-view.js'), import('./rt/rt-mc.js'), import('./compute/runtime.js')]);
+        liveView?.close();
+        const scatter = { get: () => scatterSets, set: (list) => { scatterSets = list; model.dirty = true; } };   // RT.5: saved with the file
+        // RT.4: Share needs saving, the file's name and the animation path (the timeline, else the scenes made into one)
+        const animation = () => { if (!timeline.has() && model.scenes.length >= 2) timeline.fromScenes(); return timeline.has() ? timeline.anim : null; };
+        liveView = await openLiveView(mcLive({ model, cam, view, host, settings: () => renderSettings || {}, scatter, download: (blob, name) => download(blob, name, blob.type || 'application/octet-stream'), fileBase: base, animation }), { t, parent: root, pool: await pagePool({}), window: kind === 'live-window' });
+        return;
+      }
+      if (kind === 'usd') { await saveAs(true); return; }   // 0.7 XF.9
       if (kind === 'print3d') { await print3d(); return; }
       if (kind === 'video') { await openVideo(); return; }   // 0.6 LC.10
       if (kind === 'render') {
@@ -1988,7 +2403,8 @@ function init(root) {
           modelSun: () => { const s = view.style.sun || {}; return { month: s.month || 6, day: s.day || 21, hour: s.hour ?? 15 }; },
           settings: renderSettings,
           save: (s) => { renderSettings = s; },
-          download: (blob, name) => download(blob, name, 'image/png'),
+          download: (blob, name) => download(blob, name, blob.type || 'application/octet-stream'),   // 0.7 RN.9: PNG, 16-bit PNG, JPEG, WebP, EXR, .ccrender
+          appName: 'ModelCraft',
           fileBase: base,
           onClose: () => { view.invalidate(); ui.over.focus({ preventScroll: true }); },
           parent: root,
@@ -2018,16 +2434,23 @@ function init(root) {
         return;
       }
       if (!model.root.faces.size && !model.root.insts.size && !model.root.edges.size) { print(t('app.export.empty')); return; }
-      if (kind === 'glb') download(exportGLB(model), base() + '.glb', 'model/gltf-binary');
+      if (kind === 'glb') download(exportGltf(model).bytes, base() + '.glb', 'model/gltf-binary');
       else if (kind === 'dae') download(exportDAE(model, { name: base() }), base() + '.dae', 'model/vnd.collada+xml');
       else if (kind === 'obj') {
-        // colours (M8): the .obj names a .mtl with one material per colour, downloaded beside it
-        let colored = false;
-        model.walk((d, wm, path, pc) => { if (pc || [...d.faces.values()].some((f) => f.color)) colored = true; });
-        if (colored) { download(exportOBJ(model, { mtl: base() + '.mtl' }), base() + '.obj', 'text/plain'); setTimeout(() => download(exportMTL(model), base() + '.mtl', 'text/plain'), 400); }
-        else download(exportOBJ(model), base() + '.obj', 'text/plain');
+        // 0.7 XF.3 (io/obj.js): meshes with their UVs and normals; colours as a .mtl beside it (M8); with imported textures,
+        // the .obj, the .mtl and the pictures go out together as one .zip
+        const r = exportObj(model, { base: base() });
+        if (!r.mtl) download(r.obj, base() + '.obj', 'text/plain');
+        else if (!r.images.length) { download(r.obj, base() + '.obj', 'text/plain'); setTimeout(() => download(r.mtl, r.mtlName, 'text/plain'), 400); }
+        else {
+          const { zip } = await import('./bcf.js');
+          const te = new TextEncoder();
+          download(zip([{ name: r.mtlName.replace(/\.mtl$/, '.obj'), data: te.encode(r.obj) }, { name: r.mtlName, data: te.encode(r.mtl) }, ...r.images.map((i) => ({ name: i.name, data: i.bytes }))]), base() + '.zip', 'application/zip');
+          print(t('io.export.obj.zip', { file: base() + '.zip', n: r.images.length }));
+        }
       }
-      else if (kind === 'stl') download(exportSTL(model), base() + '.stl', 'model/stl');
+      else if (kind === 'stl') download(exportStl(model).bytes, base() + '.stl', 'model/stl');   // 0.7 XF.3: with VisCAM colours when painted
+      else if (kind === 'ply') { const r = exportPly(model); download(r.bytes, base() + '.ply', 'application/octet-stream'); print(t('io.export.ply', { file: base() + '.ply', faces: r.report.faces })); }
       else if (kind === 'ifc') download(exportIFC(model, { name: base() }), base() + '.ifc', 'application/x-step');
       else if (kind === 'dxf' || kind === 'dwg') {
         // CAD programs: 3D faces, lines, groups and components as blocks, in the model's unit (0.4 M2)
@@ -2060,6 +2483,18 @@ function init(root) {
    * printer bed from Settings. The modules load on first use.
    */
   let printReady = -1;   // model.version of the last check that said ready (the guided first model's last step)
+  // 0.7 LC.21 (session print-07): Supports preview, Wall thickness, Hollow, Repair — a card over the view (print-ui.js, loaded on first use)
+  let printTools = null;
+  async function openPrintTool(name) {
+    printTools ??= (await import('./print-ui.js')).mountPrintTools({ root, anchor: guideBox, model, view, cam, host, t, el, print, settings, ask, afterHistory, focusView, over: ui.over, closeGuide: () => { if (guideOn) closeGuide(); } });
+    printTools.open(name);
+  }
+  // 0.7 LC.21 (session print-07): the Beginner menu style's commands ([data-beginner] in ui.inc; beginner-mc.js, loaded on first use)
+  let beginner = null;
+  root.querySelectorAll('[data-beginner]').forEach((b) => b.addEventListener('click', async () => {
+    beginner ??= (await import('./beginner-mc.js')).mountBeginner({ model, host, t, print, setTool, afterHistory, clickAct: (n) => act(n) });
+    await beginner.run(b.dataset.beginner);
+  }));
   async function print3d() {
     const [P, { printTriangles }, PP] = await Promise.all([import('./print3d.js'), import('./print-mc.js'), import('./printprep.js')]);
     const choice = { path: host.path, sel: host.sel };
@@ -2101,11 +2536,13 @@ function init(root) {
       lookRows.length ? el('h3', { className: 'mc-prep-h' }, t('app.prep.h.look')) : null,
       lookRows.length ? el('ul', { className: 'mc-print-warnings', dataset: { printWarnings: '' } }, ...lookRows.map(row)) : null,
       facts,
-      plain.fix && !parts.length && plain.verdict !== 'empty' ? el('p', { className: 'mc-note' }, t('app.print3d.fixhint')) : null);
+      plain.fix && !parts.length && plain.verdict !== 'empty' ? el('p', { className: 'mc-note' }, t('app.print3d.fixhint')) : null,
+      rep.triangles ? el('p', { className: 'mc-prep-tools', dataset: { prepTools: '' } }, el('span', {}, t('app.ptool.lead')), ...['supports', 'walls', 'hollow', 'repair'].map((k) => el('button', { type: 'button', className: 'mc-linkbtn', dataset: { key: 'tool:' + k } }, t('app.ptool.' + k + '.open')))) : null);   // 0.7 LC.21 print-07
     print(plain.verdict === 'fix' ? t('app.prep.verdict.fix', { n: plain.fix }) : t(rep.ok ? 'app.print3d.ready' : 'app.print3d.notready'));
     const buttons = !rep.triangles ? [['cancel', t('app.btn.close'), 'btn-plot']]
       : [['cancel', t('app.btn.cancel'), 'btn-line'], ...(fixable ? [['fix', t('app.prep.fixall'), 'btn-line']] : []), ['stl', t('app.print3d.stl'), 'btn-line'], ['3mf', t('app.print3d.3mf'), rep.ok ? 'btn-plot' : 'btn-line']];
     const key = await ask({ title: t('app.print3d.title'), body, buttons });
+    if (key.startsWith('tool:')) { await openPrintTool(key.slice(5)); return; }   // 0.7 LC.21 print-07
     if (key.startsWith('show:')) {
       // open the part and select what is wrong in it, as Entity info's Show problems does
       const p = parts[Number(key.slice(5))];
@@ -2167,40 +2604,78 @@ function init(root) {
       el('div', { className: 'mc-actions' }, actions[name]()));
     if (step > 0 && step < GUIDE_STEPS.length) print(t('app.guide.next', { step: t('app.guide.' + name + '.short') }));
   }
-  function openGuide() {
+  function openGuide(auto) {
     closeMenus(); hideHint();
+    printTools?.close();   // 0.7 LC.21: one card over the view at a time
     guideOn = true; guideAt = -1; guideBox.hidden = false;
     syncGuide(true);
-    guideBox.querySelector('[data-guide-act]')?.focus({ preventScroll: true });
+    if (auto !== true) guideBox.querySelector('[data-guide-act]')?.focus({ preventScroll: true });   // started by itself: the focus stays where it is
   }
-  function closeGuide() { guideOn = false; guideBox.hidden = true; focusView(); }
-  root.querySelectorAll('[data-guide-open]').forEach((b) => b.addEventListener('click', openGuide));
+  // 0.7: it is also the first-model tour — it starts by itself the first time ModelCraft opens with nothing in it, unless this
+  // app's switch (Settings › ModelCraft, modelcraft.tour.auto) or every app's (Settings › Global, cc-tours) is off. Closing it
+  // in any way counts as having run (modelcraft.tour = 'done' | 'skipped'), as CadCraft's tour does.
+  const TOUR_KEY = 'modelcraft.tour', TOUR_AUTO_KEY = 'modelcraft.tour.auto', TOURS_KEY = 'cc-tours';
+  const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const lsSet = (k, v) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* private window */ } };
+  function closeGuide() {
+    guideOn = false; guideBox.hidden = true;
+    lsSet(TOUR_KEY, guideAt >= GUIDE_STEPS.length ? 'done' : 'skipped');
+    focusView();
+  }
+  root.querySelectorAll('[data-guide-open]').forEach((b) => b.addEventListener('click', () => openGuide()));
+  setTimeout(() => {
+    const d = model.root, empty = !(d.edges.size || d.faces.size || d.insts.size || model.dims.size || model.guides.size);
+    if (!guideOn && empty && !lsGet(TOUR_KEY) && lsGet(TOUR_AUTO_KEY) !== 'off' && lsGet(TOURS_KEY) !== 'off') openGuide(true);
+  }, 1500);
+  {
+    const sd = document.querySelector('[data-app-settings]'), auto = sd?.querySelector('[data-tour-auto]');
+    sd?.querySelector('[data-set-tour]')?.addEventListener('click', () => { sd.close?.(); openGuide(); });
+    if (auto) {
+      auto.checked = lsGet(TOUR_AUTO_KEY) !== 'off';
+      auto.addEventListener('change', () => lsSet(TOUR_AUTO_KEY, auto.checked ? null : 'off'));
+      sd.addEventListener('cc-settings-reset', () => { lsSet(TOUR_AUTO_KEY, null); auto.checked = true; });
+    }
+  }
   setInterval(() => syncGuide(false), 400);
   window.modelcraft.guide = { open: openGuide, close: closeGuide, step: () => (guideOn ? guideAt : null) };
+  window.modelcraft.printTool = { open: (n) => openPrintTool(n), close: () => printTools?.close(), current: () => printTools?.current() || null };   // 0.7 LC.21 (tests)
 
   // the hidden inputs stay for browsers without the host picker's handles (and for tests: setInputFiles)
   ui.fileOpen.addEventListener('change', () => { const f = ui.fileOpen.files[0]; ui.fileOpen.value = ''; if (f) openFile(f); });
   ui.fileImport.addEventListener('change', () => { const f = ui.fileImport.files[0]; ui.fileImport.value = ''; if (f) importFile(f); });
-  const isModelFile = (f) => /\.(modelcraft|json)$/i.test(f.name);
+  const isModelFile = (f) => /\.(modelcraft|json|usd|usda|usdc|usdz)$/i.test(f.name);
+  const isUsdFile = (f) => /\.(usd|usda|usdc|usdz)$/i.test(f.name);
   const bytesOf = async (f) => (typeof f.bytes === 'function' ? new Uint8Array(await f.bytes()) : new Uint8Array(await f.arrayBuffer()));
   /** A file from the host (picker, double-click, recent list, drop): a model opens, anything else is imported. */
-  async function openFromHost(hf, { asked = false } = {}) {
+  async function openFromHost(hf, { asked = false, others = [] } = {}) {
     if (!hf) return;
-    if (!isModelFile(hf)) { await importFile(hf); return; }
+    if (!isModelFile(hf)) { await importFile(hf, others); return; }
     if (!asked && !(await confirmDiscard())) return;
     if (await openFile(hf)) saveTarget = hf.writable ? hf : null;
   }
-  fileHost.onOpenFiles(async (files) => { for (const f of files.slice(0, 1)) await openFromHost(f); });
+  // a .gltf comes with its .bin and textures: given together, it opens first and finds them among the others
+  const firstOf = (files) => files.find((f) => /\.(gltf|obj|fbx)$/i.test(f?.name || '')) || files[0];
+  fileHost.onOpenFiles(async (files) => { const f = firstOf(files); if (f) await openFromHost(f, { others: files }); });
 
   async function openFile(file, { recovered = false } = {}) {
     if (!isModelFile(file)) { importFile(file); return false; }
     try {
       if ((file.size || 0) > 200 * 1048576) throw new Error(t('app.open.toobig'));
-      const j = JSON.parse(await file.text());
+      let j;
+      if (isUsdFile(file)) {
+        // 0.7 XF.9: our own USD opens exactly as it was saved; anyone else's as groups and meshes (usd-modelcraft.js)
+        const { openUsd } = await import('./usd-modelcraft.js');
+        const r = openUsd(await bytesOf(file), { name: file.name });
+        j = r.file;
+        usdOpenNote = r.report.foreign ? t('usd.note.foreign') : r.report.notes.join(' ');
+      } else j = JSON.parse(await file.text());
       tools.escape();
       model.setImages(j.images);   // 0.5 RC.11 (b): the file's imported textures (untrusted: checked)
       for (const k of [...texMats.keys()]) if (k.startsWith('img:')) texMats.delete(k);
       model.load(j);
+      fileMaterials.images.clear();
+      fileMaterials.load(j.materials || null);   // 0.7 MT.1: the file's node materials (untrusted: every graph cleaned)
+      fileMaterials.prepare().catch(() => {});
       host.path = []; host.sel = [];
       saveTarget = null;
       fileName = file.name;
@@ -2208,24 +2683,26 @@ function init(root) {
       const v = j.view && cleanScene({ name: 'v', cam: j.view.cam, style: j.view.style });
       if (v) { cam.set(v.cam); view.style = v.style; perspBtn.setAttribute('aria-checked', String(cam.persp)); } else zoomExtents();
       renderSettings = j.view && j.view.render && typeof j.view.render === 'object' ? j.view.render : null;   // cleaned when the dialog opens
+      scatterSets = j.view && Array.isArray(j.view.scatter) ? j.view.scatter.slice(0, 64) : [];   // 0.7 RT.5: cleaned on use
       videoSettings = j.view && j.view.video && typeof j.view.video === 'object' ? j.view.video : null;   // 0.6 LC.10, cleaned when the dialog opens
       timeline.load(j.anim);   // 0.6 LC.10 (untrusted: checked)
       xrmc.load(j.issues);   // 0.6 LC.19 (untrusted: checked)
-      ui.units.value = model.units;
+      showUnits();
       styleToUi(); renderScenes(); setTool('select'); hideHint();
       scheduleInfo(); view.invalidate();
       if (recovered) { model.dirty = true; print(t('app.open.recovered', { file: file.name })); }
-      else { adoc.clean(); print(t('app.open.done', { file: file.name })); }
+      else { adoc.clean(); print(t('app.open.done', { file: file.name }) + (usdOpenNote ? ' ' + usdOpenNote : '')); }
+      usdOpenNote = '';
       return true;
     } catch (err) {
       print(err instanceof SyntaxError ? t('app.open.notjson') : err.message);
       return false;
     }
   }
-  async function importFile(file) {
+  async function importFile(file, companions = []) {
     const ext = (file.name.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
     const name = file.name.replace(/\.[^.]+$/, '').slice(0, 80) || t('app.import.default');
-    if (!['skp', 'dae', 'obj', 'glb', 'gltf', 'dwg', 'dxf'].includes(ext)) { print(t('app.import.kind', { file: file.name })); return; }
+    if (!['skp', 'dae', 'obj', 'glb', 'gltf', 'dwg', 'dxf', 'ply', 'stl', 'abc', 'fbx', 'usd', 'usda', 'usdc', 'usdz', 'step', 'stp', '3dm'].includes(ext)) { print(t('app.import.kind', { file: file.name })); return; }
     try {
       if ((file.size || 0) > 300 * 1048576) throw new Error(t('app.import.toobig'));
       tools.escape();
@@ -2250,10 +2727,14 @@ function init(root) {
           unit = await ask({ title: t('app.import.units.h'), text: t('app.import.units.text', { kind: ext.toUpperCase() }), buttons: [['cancel', t('app.btn.cancel'), 'btn-line'], ['in', t('app.import.units.in'), 'btn-line'], ['ft', t('app.import.units.ft'), 'btn-line'], ['mm', t('app.import.units.mm'), 'btn-line'], ['m', t('app.import.units.m'), 'btn-plot']] });
           if (unit === 'cancel') return;
         }
-        r = model.change(t('app.undo.import_site'), (m) => { const x = read(m, { unit: unit || undefined }); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
+        // other programs' 3D solids (ACIS, 0.7 D7.25): cc-acis loads with the drawing, the first read only asks for units
+        const acis = await import('./acis/index.js');
+        r = model.change(t('app.undo.import_site'), (m) => { const x = read(m, { unit: unit || undefined, acis }); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
         const R = r.report;
-        if (!r.def.edges.size) print(t('app.import.site.empty', { file: file.name }) + skipped(R));
-        else print(t('app.import.site', { file: file.name, edges: r.def.edges.size }) + (r.def.faces.size ? ' ' + t('app.import.site.faces', { n: r.def.faces.size }) : '') + (R.texts ? ' ' + t('app.import.site.texts', { n: R.texts }) : '') + ' ' + t('app.import.site.group') + skipped(R) + dynamicNote(dwgModel));
+        const solidsNote = (R.solids ? ' ' + t('ccacis.app.import', { n: R.solids, closed: R.solidsClosed }) : '') + (R.acisNotDrawn?.length ? ' ' + t('ccacis.not_drawn', { list: acis.notDrawnText(acis.addNotDrawn(new Map(), R.acisNotDrawn)) }) : '');
+        if (!r.def.edges.size && R.solids) print(solidsNote.trim() + skipped(R));
+        else if (!r.def.edges.size) print(t('app.import.site.empty', { file: file.name }) + skipped(R) + solidsNote);
+        else print(t('app.import.site', { file: file.name, edges: r.def.edges.size }) + (r.def.faces.size ? ' ' + t('app.import.site.faces', { n: r.def.faces.size }) : '') + (R.texts ? ' ' + t('app.import.site.texts', { n: R.texts }) : '') + ' ' + t('app.import.site.group') + skipped(R) + solidsNote + dynamicNote(dwgModel));
       } else if (ext === 'skp') {
         // SketchUp: our own reader (cc-skp, ./skp/), loaded on the first .skp
         const bytes = await bytesOf(file);
@@ -2276,14 +2757,82 @@ function init(root) {
         const conv = [rep.up !== 'Z_UP' && t('app.import.dae.up', { axis: rep.up === 'Y_UP' ? 'Y' : 'X' }), rep.meter !== 1 && t('app.import.dae.unit', { m: rep.meter })].filter(Boolean);
         print((rep.components ? t('app.import.dae.comps', { file: file.name, faces: rep.faces, n: rep.components }) : t('app.import.dae', { file: file.name, n: rep.faces }))
           + (conv.length ? ' ' + t('app.import.dae.converted', { how: conv.join(', ') }) : '') + skipped(rep));
-      } else if (ext === 'obj') {
-        const text = await file.text();
-        r = model.change(t('app.undo.import_obj'), (m) => { const x = importOBJ(m, text, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
-        print(t('app.import.dae', { file: file.name, n: r.def.faces.size }) + skipped(r.report));
-      } else {
+      } else if (ext === 'usd' || ext === 'usda' || ext === 'usdc' || ext === 'usdz') {
+        // 0.7 XF.2 (usd-modelcraft.js on cc-usd): any USD scene in as groups, meshes, components, lamps and cameras;
+        // layers it refers to come from the files dropped with it
         const bytes = await bytesOf(file);
-        r = model.change(t('app.undo.import_gltf'), (m) => { const x = importGLTF(m, bytes, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
-        print(t('app.import.dae', { file: file.name, n: r.def.faces.size }) + skipped(r.report));
+        const { importUsd } = await import('./usd-modelcraft.js');
+        const byName = new Map();
+        for (const f of companions) byName.set(f.name.toLowerCase(), await bytesOf(f));
+        const read = (n) => byName.get(String(n).split(/[\\/]/).pop().toLowerCase()) || null;
+        r = model.change(t('usd.undo.import'), (m) => { const x = importUsd(m, bytes, name, { read, fileName: file.name }); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
+        print(t('usd.imported', { name: file.name, meshes: r.report.meshes, materials: r.report.materials }) + (r.report.notes.length ? ' ' + t('usd.note.notes', { notes: r.report.notes.slice(0, 3).join(' ') }) : ''));
+      } else if (ext === 'step' || ext === 'stp') {
+        // 0.7 D7.26 (session part-08): STEP through cc-step (io/step/), every solid as triangles where the file places it
+        const bytes = await bytesOf(file);
+        print(t('app.import.reading', { file: file.name }));
+        const { readStepFile, importStep } = await import('./io/step-import.js');
+        await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+        let read;
+        try { read = readStepFile(bytes); } catch (err) { throw err && err.code ? new Error(t(err.code, err.vars)) : err; }
+        r = model.change(t('app.undo.import_step'), (m) => { const x = importStep(m, read, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
+        const R = r.report;
+        print(t('io.import.step', { file: file.name, schema: R.schema, n: R.solids, faces: R.faces }) + (R.notes.length ? ' ' + t('io.import.step_notes', { notes: R.notes.slice(0, 3).join(' ') }) : '') + skipped(R));
+      } else if (ext === '3dm') {
+        // 0.7 SU.810 (session 3dm): cc-3dm (io/3dm/) — meshes, polysurfaces (saved render meshes, else tessellated), curves, blocks, layers
+        const bytes = await bytesOf(file);
+        print(t('ccdm.app.reading', { file: file.name }));
+        const { read3dmFile, import3dm, importMessage } = await import('./io/3dm-import.js');
+        await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+        const scene = read3dmFile(bytes);
+        r = model.change(t('ccdm.app.undo'), (m) => { const x = import3dm(m, scene, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
+        print(importMessage(file.name, r.report) + skipped(r.report));
+      } else if (ext === 'obj' || ext === 'ply' || ext === 'stl' || ext === 'abc' || ext === 'fbx') {
+        // 0.7 XF.3 (io/): OBJ + MTL with textures (found among the files dropped with it), PLY and STL with colour, Alembic caches
+        const bytes = await bytesOf(file);
+        const ctxId = model.context(host.path).def.id;
+        const into = (label, build) => model.change(label, (m) => { const x = build(m); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [ctxId]);
+        if (ext === 'obj') {
+          const { readObj, importObj } = await import('./io/obj.js');
+          const byName = new Map(companions.map((f) => [f.name.toLowerCase(), f]));
+          const resolve = async (u) => { const f = byName.get(String(u).split(/[\\/]/).pop().toLowerCase()); return f ? bytesOf(f) : null; };
+          const obj = await readObj(bytes, { resolve });
+          r = into(t('app.undo.import_obj'), (m) => importObj(m, obj, name));
+          print(t('io.import.obj', { file: file.name, faces: r.report.faces, n: r.report.objects }) + (r.report.textures ? ' ' + t('io.import.textures', { n: r.report.textures }) : '') + skipped(r.report));
+        } else if (ext === 'ply') {
+          const { readPly, importPly } = await import('./io/ply.js');
+          const ply = readPly(bytes);
+          r = into(t('app.undo.import_ply'), (m) => importPly(m, ply, name));
+          print((r.report.faces ? t('io.import.ply', { file: file.name, faces: r.report.faces }) : t('io.import.none', { file: file.name })) + (r.report.colours ? ' ' + t('io.import.colours', { n: r.report.colours }) : '') + skipped(r.report));
+        } else if (ext === 'stl') {
+          const { readStl, importStl } = await import('./io/stl.js');
+          const stl = readStl(bytes);
+          r = into(t('app.undo.import_stl'), (m) => importStl(m, stl, name, { unit: 'mm' }));
+          print(t('io.import.stl', { file: file.name, faces: r.report.faces, unit: t('app.import.units.mm') }) + (r.report.colours ? ' ' + t('io.import.colours', { n: r.report.colours }) : '') + skipped(r.report));
+        } else if (ext === 'fbx') {
+          // 0.7 XF.6: our own clean-room FBX reader (docs/spikes/fbx-reader.md); textures it names come from the files dropped with it
+          const [{ parseFbx }, { readFbxScene, importFbx }] = await Promise.all([import('./io/fbx-parse.js'), import('./io/fbx-import.js')]);
+          const byName = new Map(companions.map((f) => [f.name.toLowerCase(), f]));
+          const scene = await readFbxScene(parseFbx(bytes), { resolve: async (u) => { const f = byName.get(String(u).toLowerCase()); return f ? bytesOf(f) : null; } });
+          r = into(t('app.undo.import_fbx'), (m) => importFbx(m, scene, name));
+          const R = r.report;
+          print(t('io.import.fbx', { file: file.name, faces: R.faces, n: R.meshes }) + (R.textures ? ' ' + t('io.import.textures', { n: R.textures }) : '')
+            + (R.lights ? ' ' + t('io.import.lights', { n: R.lights }) : '') + (R.cameras ? ' ' + t('io.import.cameras', { n: R.cameras }) : '')
+            + (R.bones || R.animations ? ' ' + t('io.import.fbx.animation', { bones: R.bones, animations: R.animations }) : '') + skipped(R));
+        } else {
+          const { readAbc, importAbc } = await import('./io/abc.js');
+          const abc = readAbc(bytes);
+          r = into(t('app.undo.import_abc'), (m) => importAbc(m, abc, name));
+          print(t('io.import.abc', { file: file.name, faces: r.report.faces, n: r.report.meshes }) + (abc.samples > 1 ? ' ' + t('io.import.abc.frames', { n: abc.samples }) : '') + skipped(r.report));
+        }
+      } else {
+        // glTF 2.0 (0.7 XF.1, io/gltf.js): read with its decoders (Draco, meshopt) loaded only when the file uses them,
+        // a .gltf's own .bin and textures taken from the files dropped or picked with it
+        const bytes = await bytesOf(file);
+        const { readGltfFile, importGltfScene, importMessage } = await import('./io/gltf.js');
+        const scene = await readGltfFile(bytes, { companions });
+        r = model.change(t('app.undo.import_gltf'), (m) => { const x = importGltfScene(m, scene, name); m.place(m.context(host.path).def, x.def.id, ident()); return x; }, [model.context(host.path).def.id]);
+        print(importMessage(file.name, r.report) + skipped(r.report));
       }
       const iid = [...ctxDef().insts.keys()].pop();
       host.setSel([{ t: 'i', id: iid }]);
@@ -2304,8 +2853,8 @@ function init(root) {
   ui.stage.addEventListener('drop', async (e) => {
     e.preventDefault();
     dragDepth = 0; ui.drop.hidden = true;
-    const [f] = await fileHost.fromDrop(e.dataTransfer);
-    await openFromHost(f);
+    const files = await fileHost.fromDrop(e.dataTransfer);
+    await openFromHost(firstOf(files), { others: files });
   });
 
   // ---- dialogs ----
@@ -2644,6 +3193,13 @@ function init(root) {
   scheduleInfo();
   view.invalidate();
   print(t('app.units.start', { unit: unitWords(model.units) }));
+  // 0.7 WS.9: the shell's workspace layouts (Settings › Global › Layout) for builds whose manifest lists them (app-shell.inc writes
+  // #cc-workspace and maps cc-workspace then); workspace-modelcraft.js fills the engine's blocks. A failed start shows the page.
+  if (document.getElementById('cc-workspace')) {
+    const show = () => document.documentElement.removeAttribute('data-cc-ws-boot');
+    import('./workspace-modelcraft.js').then((m) => m.mountModelcraftLayouts({ root, t, mc: window.modelcraft }))
+      .then((api) => { layouts = api; if (!api) show(); }, (err) => { show(); console.warn(err); });
+  }
   // desktop: the file the app was started with (double-click, "Open with")
   fileHost.launchFiles().then((files) => openFromHost(files[0], { asked: true })).catch(() => {});
   // Studio Live from a link (#live=<code> on a host's LAN page, ?live=<ROOM>#<secret> from an invite): join; the model comes from the host

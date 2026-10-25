@@ -48,10 +48,10 @@ A color painted on a face **inside** a component shows on every copy, because th
 
 - The ModelCraft file keeps every color and every material.
 - Other formats get a **material's color** (its look from afar) in place of the texture: glTF, Collada, OBJ, DWG and DXF, and the 3D printing check. In glTF, Collada and OBJ the material keeps its name, such as `Material_brick-red`.
-- **glTF (.glb)** and **Collada (.dae)**: each color becomes a material. A component shown in different colors is written once per color.
-- **OBJ**: exporting downloads two files, the `.obj` and a `.mtl` materials file with the colors. Keep them in the same folder.
+- **glTF (.glb)** and **Collada (.dae)**: each color becomes a material. A component shown in different colors is written once per color. glTF also writes imported textures as textures.
+- **OBJ**: exporting downloads two files, the `.obj` and a `.mtl` materials file with the colors. Keep them in the same folder. With imported textures, the `.obj`, the `.mtl` and the pictures come as one `.zip`.
 - **DWG** keeps the exact colors; **DXF** uses the nearest of the 255 standard CAD colors.
-- **STL** has no colors.
+- **STL** and **PLY** carry colors: STL in the VisCAM / SolidView convention (programs that don't read it ignore it), PLY as a color on each point. See [File formats in detail](topic:formats).
 
 :::tip
 To model a screen, paint the frame charcoal and the glass blue after you [offset](topic:draw-faces) the front face.

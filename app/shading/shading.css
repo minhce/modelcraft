@@ -1,0 +1,72 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* shading.css — the Shading workspace and the node editor (0.7 MT.1, session `materials`). Tokens from the site (paper/model). */
+
+/* the 3D view keeps the top of the stage, the node editor the bottom */
+.mc-stage-shading .mc-canvas { height: 55%; }
+.mc-shading { position: absolute; left: 0; right: 0; bottom: 0; height: 45%; border-top: var(--pen-2) solid var(--line); background: var(--sheet-2); display: flex; flex-direction: column; }
+.mc-stage-shading .cc-vc.at-bottom-right, .mc-stage-shading .cc-axes.at-bottom-right,
+.mc-stage-shading .cc-vc.at-bottom-left, .mc-stage-shading .cc-axes.at-bottom-left { bottom: calc(45% + .5rem); }
+.mc-shading-empty { margin: auto; text-align: center; color: var(--ink-2); }
+.mc-shading-empty p { margin: 0 0 .75rem; }
+.mc-shading-list { display: flex; flex-direction: column; gap: .125rem; margin-bottom: .75rem; }
+.mc-shading-item { display: flex; align-items: center; gap: .5rem; padding: .25rem .375rem; text-align: left; color: var(--ink); background: none; border: var(--pen-1) solid transparent; border-radius: var(--radius); font-size: .875rem; }
+.mc-shading-item:hover { border-color: var(--line); }
+.mc-shading-item.is-on { border-color: var(--action); background: color-mix(in srgb, var(--action) 8%, transparent); }
+.mc-shading-item .mc-swatch { width: 1.5rem; height: 1.5rem; flex: none; background-size: cover; }
+
+/* the node editor (shading/editor.js) */
+.cc-ne { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.cc-ne[hidden] { display: none; }
+.cc-ne-bar { display: flex; align-items: center; gap: .25rem; padding: .25rem .5rem; border-bottom: var(--pen-1) solid var(--line); }
+.cc-ne-add { max-width: 14rem; }
+.cc-ne-btn { min-width: 2rem; }
+.cc-ne-view { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; background: var(--sheet-2); }
+.cc-ne-view:focus-visible { outline: var(--pen-2) solid var(--action); outline-offset: -2px; }
+.cc-ne-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.cc-ne-wires { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.cc-ne-wire { fill: none; stroke: var(--ink-2); stroke-width: 2px; pointer-events: stroke; cursor: pointer; }
+.cc-ne-wire.is-near { stroke: var(--ink); }
+.cc-ne-wire.is-sel { stroke: var(--action); stroke-width: 3px; }
+.cc-ne-wire.is-temp { stroke: var(--action); stroke-dasharray: 6 4; pointer-events: none; }
+.cc-ne-node { position: absolute; width: 13rem; color: var(--ink); background: var(--sheet); border: var(--pen-2) solid var(--line); border-radius: var(--radius); font-size: .8125rem; cursor: default; }
+.cc-ne-node.is-sel { border-color: var(--action); }
+.cc-ne-node.is-output { width: 15rem; border-color: var(--ink); }
+.cc-ne-node.is-sel.is-output { border-color: var(--action); }
+.cc-ne-node:focus-visible { outline: var(--pen-2) solid var(--action); outline-offset: 2px; }
+.cc-ne-head { display: flex; align-items: center; justify-content: space-between; gap: .25rem; padding: .25rem .5rem; font-weight: 700; background: var(--sheet-2); border-bottom: var(--pen-1) solid var(--line); cursor: move; user-select: none; }
+.cc-ne-x { padding: 0 .125rem; color: var(--ink-2); background: none; border: 0; line-height: 1; }
+.cc-ne-x:hover { color: var(--ink); }
+.cc-ne-outs, .cc-ne-ins, .cc-ne-params { padding: .25rem 0; }
+.cc-ne-params { border-top: var(--pen-1) solid var(--line); }
+.cc-ne-row { position: relative; display: flex; align-items: center; gap: .375rem; min-height: 1.625rem; padding: .0625rem .625rem; }
+.cc-ne-row.is-out { justify-content: flex-end; }
+.cc-ne-row label, .cc-ne-k { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-ne-row.is-stops { align-items: flex-start; flex-direction: column; }
+.cc-ne-num { width: 4.75rem; padding: .0625rem .25rem; font-size: .8125rem; }
+.cc-ne-v3 { display: inline-flex; gap: .125rem; }
+.cc-ne-v3 .cc-ne-num { width: 3rem; }
+.cc-ne-sel { max-width: 7.5rem; padding-top: .0625rem; padding-bottom: .0625rem; font-size: .8125rem; }
+.cc-ne-color { width: 2.5rem; height: 1.375rem; padding: 0; border: var(--pen-1) solid var(--line); background: none; }
+.cc-ne-stops { display: flex; flex-direction: column; gap: .125rem; width: 100%; }
+.cc-ne-stop { display: flex; align-items: center; gap: .25rem; }
+.cc-ne-more { margin: .125rem .625rem 0; }
+/* sockets: a dot on the node's edge, coloured by kind */
+.cc-ne-sock { position: absolute; top: 50%; width: .75rem; height: .75rem; margin-top: -.375rem; border-radius: 50%; border: var(--pen-1) solid var(--ink); background: var(--sheet); cursor: crosshair; }
+.cc-ne-row.is-out .cc-ne-sock { right: -.4375rem; }
+.cc-ne-row.is-in .cc-ne-sock { left: -.4375rem; }
+.cc-ne-sock.k-f { background: var(--layer-ochre); }
+.cc-ne-sock.k-c { background: var(--layer-magenta); }
+.cc-ne-sock.k-v2 { background: var(--layer-cyan); }
+.cc-ne-sock.k-v3 { background: var(--layer-violet); }
+.cc-ne-sock:hover { outline: var(--pen-2) solid var(--action); }
+@media (pointer: coarse) { .cc-ne-sock { width: 1.125rem; height: 1.125rem; margin-top: -.5625rem; } }
+
+/* MT.3: the material library (LibraryCraft) in the panel, and the texture-set import */
+.mc-shading-lib { margin: .75rem 0; }
+.mc-shading-lib > summary { cursor: pointer; font-weight: 700; font-size: var(--fs-sm); }
+.mc-libmats { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr)); gap: .375rem; margin-top: .5rem; }
+.mc-libmat { display: flex; flex-direction: column; align-items: center; gap: .25rem; padding: .25rem; color: var(--ink); background: var(--sheet); border: var(--pen-1) solid var(--line); border-radius: var(--radius); font-size: .75rem; cursor: grab; }
+.mc-libmat:hover, .mc-libmat:focus-visible { border-color: var(--action); }
+.mc-libmat img, .mc-libmat-none { width: 4rem; height: 4rem; border-radius: 50%; background: var(--sheet-2); object-fit: cover; }
+.mc-libmat > span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-shading-acts { display: flex; flex-wrap: wrap; gap: .375rem; margin: .375rem 0; }

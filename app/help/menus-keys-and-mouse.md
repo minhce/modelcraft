@@ -8,13 +8,14 @@ keywords: menu style, menus, menu bar, toolbar, keyboard shortcuts, hotkeys, key
 
 ModelCraft's tools are the same whichever way you reach them. A **menu style** decides where they sit on screen, what they are called there and which keys run them. Choose one in {{ui:Settings}} ({{key:Mod+,}}) › {{ui:ModelCraft}} › {{ui:Menus, keys and mouse}}; the change is immediate, and this browser remembers it.
 
-## The three styles
+## The styles
 
 | Style | What you get |
 |---|---|
 | {{ui:ModelCraft}} | ModelCraft's own toolbar (File, Draw, Modify, Organize, Edit, Camera) and its single-letter keys: {{key:L}} line, {{key:R}} rectangle, {{key:P}} push/pull, {{key:M}} move, {{key:Q}} rotate, {{key:S}} scale, {{key:E}} eraser, {{key:O}} orbit. The start. |
 | {{ui:Push-pull}} | A menu bar (File, Edit, View, Camera, Draw, Tools, Window) over a row of the main tools, with the same single-letter keys. |
 | {{ui:Modeler}} | A header menu bar (File, Edit, View, Select, Add, Object, Mesh) and the keys of mesh modelers: {{key:W}} select, {{key:G}} grab, {{key:R}} rotate and {{key:S}} scale the selection at once ({{key:X}}, {{key:Y}} or {{key:Z}} locks an axis while it moves), {{key:E}} push/pull, {{key:B}} rectangle, {{key:X}} delete, {{key:A}} select all, {{key:Alt+A}} none, {{key:Shift+D}} duplicate, {{key:Mod+G}} group, {{key:H}} hide. The middle button orbits; {{key:Shift}} and the middle button pan, {{key:Mod}} and the middle button zoom; the right button cancels what a tool is doing. |
+| {{ui:Beginner}} | A ribbon whose {{ui:Make}} tab is a few big buttons: shapes to drop, holes, move, turn and size, align, {{ui:Group}} (holes cut into the shapes) and the check for 3D printing; every other tool on the {{ui:More tools}} tab. The right button orbits, the middle button pans. See [The Beginner style](topic:beginner). |
 
 The key style you may know from {{ui:Keys}} at the bottom right of the view and from {{ui:Edit}} › {{ui:More}} is the same choice: picking the modeler keys there picks the {{ui:Modeler}} style, and picking the push-pull keys leaves it for the {{ui:ModelCraft}} style. If you had chosen the modeler keys in an older version, ModelCraft opens in the {{ui:Modeler}} style once, by itself.
 

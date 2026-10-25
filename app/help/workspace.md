@@ -23,6 +23,8 @@ The slim bar at the very top belongs to every CadCraft app. It has the app name 
 
 The toolbar is split into labeled groups. Hover a button to see its name and key.
 
+At its left, the {{ui:Workspace}} list switches what the toolbar and the right panel are for: {{ui:Model}} (push/pull modeling, the tour below), {{ui:Mesh}} ([edit a mesh](topic:mesh-edit)), {{ui:Curve}} ([curve objects](topic:curves)), {{ui:UV}} ([lay out UVs](topic:uv)), {{ui:Sculpt}} ([sculpt](topic:sculpt)), {{ui:Shading}} ([materials made with nodes](topic:shading)), {{ui:Animate}} ([animate](topic:animate)) and {{ui:Render}} ([render in the view](topic:render#render-in-the-view)).
+
 | Group | Buttons |
 |---|---|
 | File | {{ui:New}}, {{ui:Open}}, {{ui:Save}}, {{ui:Import}}, {{ui:Export}} (a menu of formats) |
@@ -55,7 +57,7 @@ The middle of the screen. The red, green and blue lines are the axes: red and gr
 - **Find by name** (shown once there are two or more groups) keeps only the rows whose name matches, with the groups they are in. {{key:Esc}} clears it.
 - The **eye** at the end of a row hides or shows that group or component (as {{ui:Edit}} › {{ui:More}} › {{ui:Hide}} does). A tag icon means it is hidden by its [tag](topic:tags).
 - **Rename in place:** click a row, then press {{key:F2}}, type, and press {{key:Enter}} ({{key:Esc}} keeps the old name).
-- **Drag a row onto another group** to move it inside that group; drag it onto the {{ui:Outliner}} heading to move it to the top level. It stays where it is in the model, and keeps its color, tag and name. A group cannot go inside itself. Each move is one undo step.
+- **Drag a row** onto the middle of another group's row to move it inside that group, onto the top or bottom edge of a row to put it just before or after that row, or onto the {{ui:Outliner}} heading to move it to the top level. It stays where it is in the model, and keeps its color, tag and name. A group cannot go inside itself. Each move is one undo step. See [Rearrange in the Outliner](topic:groups-components#rearrange-in-the-outliner).
 - While you edit inside a group, a line reads "Editing: Model › …", and a {{ui:Close group}} button appears. It closes every open level at once.
 
 **{{ui:Components}}** lists every component definition with how many copies are placed ("3×") and a {{ui:Place}} button that adds another copy where you click.
@@ -90,4 +92,4 @@ Along the bottom, from left to right:
 
 ## On a narrow screen
 
-Below about 760 pixels wide (a phone, or a narrow window), the columns stack: the toolbar, then the 3D view, the status bar, the right panels and the left panels. Scroll the page to reach the panels.
+Below about 760 pixels wide (a phone, or a narrow window), the 3D view keeps the screen. The toolbar is one row that scrolls sideways, and the panels open as sheets from the bar at the bottom of the screen.

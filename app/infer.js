@@ -17,6 +17,7 @@
 import { add, sub, mul, dot, cross, len, norm, dist, apply, rayTri, rayToSegment, lineLine, rayPlane, closestOnLine, planeFrom, applyDir, invert } from './vec.js';
 import { BoxTree, boxesOf } from './bvh.js';
 import { faceTris, faceNormal } from './model.js';
+import { FL_HIDE, FL_SHARP } from './mesh.js';
 import { t } from "./i18n.js";
 
 /** Inference tips in the page's language (getters: read when asked for). */
@@ -67,7 +68,8 @@ const local = new WeakMap();   // definition object → its faces and edges in i
 const fresh = (model, def, L) => !!L && (model.kept ? model.kept(def, L) : L.v === model.version);
 function localOf(def, model) {
   let L = local.get(def);
-  if (fresh(model, def, L)) return L;
+  if (fresh(model, def, L) && (!def.mesh || L.src === def.shown)) return L;
+  if (def.mesh) { L = localOfMesh(def, model); L.src = def.shown; local.set(def, L); return L; }
   const faces = [], edges = [];
   let nt = 0;
   for (const [id, f] of def.faces) {
@@ -95,6 +97,57 @@ function localOf(def, model) {
   L = { ...(model.stamp ? model.stamp(def) : { v: model.version }), faces, edges, tri, triFace, pts, ftree: new BoxTree(tb), etree: new BoxTree(boxesOf(edges.length, (i) => [edges[i].a, edges[i].b])) };
   local.set(def, L);
   return L;
+}
+
+/**
+ * A mesh definition's faces and edges (0.7 MD.1), from the mesh's arrays: triangles straight into the face tree; the
+ * faces themselves (id = the mesh's face index) made only when something asks for one; edges = sharp and open edges.
+ */
+function localOfMesh(def, model) {
+  const mesh = def.shown || def.mesh, P = mesh.P, hV = mesh.hV;   // MD.3: what shows, modifiers applied
+  const T = mesh.triangulate();
+  const fidx = [], local = new Int32Array(mesh.nf).fill(-1);
+  for (let i = 0; i < T.n; i++) { const f = T.face[i]; if (local[f] < 0) { local[f] = fidx.length; fidx.push(f); } }
+  const tri = new Float64Array(T.n * 9), triFace = new Uint32Array(T.n), tb = new Float64Array(T.n * 6);
+  const start = new Int32Array(fidx.length + 1);
+  for (let i = 0; i < T.n; i++) {
+    triFace[i] = local[T.face[i]];
+    start[triFace[i] + 1]++;
+    for (let k = 0; k < 3; k++) { const v = hV[T.tri[i * 3 + k]] * 3; tri[i * 9 + k * 3] = P[v]; tri[i * 9 + k * 3 + 1] = P[v + 1]; tri[i * 9 + k * 3 + 2] = P[v + 2]; }
+    for (let a = 0; a < 3; a++) { const x = tri[i * 9 + a], y = tri[i * 9 + 3 + a], z = tri[i * 9 + 6 + a]; tb[i * 6 + a] = Math.min(x, y, z); tb[i * 6 + 3 + a] = Math.max(x, y, z); }
+  }
+  for (let i = 0; i < fidx.length; i++) start[i + 1] += start[i];   // triangles come face by face, in face order
+  const made = new Map();
+  const faceAt = (i) => {
+    let f = made.get(i);
+    if (f) return f;
+    const tris = [];
+    for (let k = start[i]; k < start[i + 1]; k++) tris.push([0, 1, 2].map((q) => [tri[k * 9 + q * 3], tri[k * 9 + q * 3 + 1], tri[k * 9 + q * 3 + 2]]));
+    f = { id: fidx[i], tris, n: mesh.faceNormal(fidx[i]), P: tris[0]?.[0] || [0, 0, 0], mesh: true };
+    made.set(i, f);
+    return f;
+  };
+  const faces = new Proxy([], {
+    get(target, prop) {
+      if (prop === 'length') return fidx.length;
+      if (typeof prop === 'string' && /^\d+$/.test(prop)) return +prop < fidx.length ? faceAt(+prop) : undefined;
+      if (prop === Symbol.iterator) return function* () { for (let i = 0; i < fidx.length; i++) yield faceAt(i); };
+      const v = Array.prototype[prop];
+      return typeof v === 'function' ? v : target[prop];
+    },
+    has(target, prop) { return typeof prop === 'string' && /^\d+$/.test(prop) ? +prop < fidx.length : prop in target; },
+  });
+  const edges = [];
+  for (let h = 0; h < mesh.nh; h++) {
+    if (mesh.heDead(h) || mesh.fFl[mesh.hF[h]] & FL_HIDE) continue;
+    const t = mesh.hTw[h];
+    if (t >= 0 && (t < h || !(mesh.hFl[h] & FL_SHARP))) continue;
+    edges.push({ id: h, a: mesh.pos(hV[h]), b: mesh.pos(mesh.head(h)), soft: false, mesh: true });
+  }
+  const pts = new Float64Array(mesh.nv * 3);
+  let n = 0;
+  for (let v = 0; v < mesh.nv; v++) if (!mesh.vertDead(v)) { pts[n * 3] = P[v * 3]; pts[n * 3 + 1] = P[v * 3 + 1]; pts[n * 3 + 2] = P[v * 3 + 2]; n++; }
+  return { ...(model.stamp ? model.stamp(def) : { v: model.version }), faces, edges, tri, triFace, pts: pts.slice(0, n * 3), ftree: new BoxTree(tb), etree: new BoxTree(boxesOf(edges.length, (i) => [edges[i].a, edges[i].b])) };
 }
 
 /** One placement of a definition: world faces and edges made as they are asked for. */
@@ -134,9 +187,11 @@ class Scene {
     return this._faces;
   }
   get edges() {
-    if (!this._edges) { this._edges = []; for (const P of this.insts) for (let i = 0; i < P.L.edges.length; i++) { const e = P.edge(i); if (e) this._edges.push(e); } }
+    if (!this._edges) { this._edges = []; for (const P of this.insts) for (let i = 0; i < P.L.edges.length; i++) { const e = P.edge(i); if (e) this._edges.push(e); } this._own = this._edges.length; }
     return this._edges;
   }
+  /** Edges a host pushed onto `edges` after it was made (CadCraft's 2D lines on the ground), world coordinates. */
+  get extra() { return this._edges ? this._edges.slice(this._own) : []; }
   face(path, id) {
     for (const P of this.insts) {
       if (P.path.length !== path.length || !P.path.every((x, i) => x === path[i])) continue;
@@ -184,6 +239,16 @@ class Scene {
         return perp <= r + reach * 1.01 + 1e-9;
       };
       P.L.etree.walk(test, (i) => { const e = P.edge(i); if (e) out.push(e); });
+    }
+    // edges pushed onto `edges` by a host (no tree): the same cone test, one by one
+    for (const e of this.extra) {
+      const cl = [(e.a[0] + e.b[0]) / 2 - o[0], (e.a[1] + e.b[1]) / 2 - o[1], (e.a[2] + e.b[2]) / 2 - o[2]];
+      const r = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1], e.b[2] - e.a[2]) / 2;
+      const along = cl[0] * d[0] + cl[1] * d[1] + cl[2] * d[2];
+      if (cam.persp && along < -r) continue;
+      const perp = Math.sqrt(Math.max(0, cl[0] * cl[0] + cl[1] * cl[1] + cl[2] * cl[2] - along * along));
+      const reach = cam.persp ? k * (Math.hypot(cl[0], cl[1], cl[2]) + r) : flat;
+      if (perp <= r + reach * 1.01 + 1e-9) out.push(e);
     }
     return out;
   }

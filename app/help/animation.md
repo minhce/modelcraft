@@ -12,6 +12,10 @@ The **timeline** moves the camera and any group or component over time. You set 
 
 Click {{ui:Views}} in the {{ui:Camera}} group, then {{ui:Animation timeline}}. The timeline opens under the view: the controls along the top, then a **Camera** row and a row for each group or component that moves. The diamonds are keys; the red line is the **playhead**, the moment shown in the view.
 
+:::touch
+On a phone the timeline opens under the view as well. Its controls are one row: swipe it sideways to reach the rest; the button that closes the timeline stays at its end.
+:::
+
 Drag the slider (or click in a row) to move the playhead. {{ui:Play}} plays from the playhead; {{ui:Previous key}} and {{ui:Next key}} jump between keys.
 
 ## Move the camera
@@ -67,13 +71,13 @@ The sky, sun, materials, lamps and brightness are the ones set in {{ui:Render a 
 | {{ui:Size}} | 480p, 720p HD, 1080p Full HD, or the view's own shape (up to 1920 pixels wide) |
 | {{ui:Frame rate}} | 24, 25, 30 or 60 frames a second. Twice the frames take twice as long |
 | {{ui:Quality of each frame}} | {{ui:Quick}} (4 passes), {{ui:Draft}} (16) or {{ui:Good}} (64): more passes give smoother shadows and edges |
-| {{ui:File}} | {{ui:WebM video}}, or {{ui:PNG pictures, one per frame (ZIP)}} for video editors (and for browsers with no video encoder) |
+| {{ui:File}} | {{ui:WebM video}}, {{ui:MP4 video (H.264)}} where the browser can write it, or {{ui:PNG pictures, one per frame (ZIP)}} for video editors (and for browsers with no video encoder) |
 
 :::tip
 A 10-second video at 30 frames a second is 301 frames. Try {{ui:Quick}} at 480p first to check the motion, then render {{ui:Draft}} or {{ui:Good}} at a bigger size.
 :::
 
-WebM plays in browsers and VLC, and video editors convert it. Videos use the fast renderer; the high-quality path-traced mode makes pictures only.
+WebM plays in browsers and VLC, and video editors convert it. {{ui:MP4 video (H.264)}} is offered where the browser can write it. {{ui:Render video}} uses the fast renderer; to path trace every frame, choose {{ui:Add this animation to the queue}} in the same dialog: the frames render in the [render queue](topic:render#the-render-queue), which needs WebGPU.
 
 :::firefox safari
 Rendering a video needs a browser that encodes video itself (WebCodecs): recent Chrome, Edge, Firefox and Safari 17 do. Without it, choose {{ui:PNG pictures, one per frame (ZIP)}}.

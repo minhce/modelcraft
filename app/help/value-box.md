@@ -36,6 +36,25 @@ If ModelCraft cannot read what you typed, the status bar says "Type a length suc
 Always use a **period** for decimals: `2.5m`. A comma separates two values, so `2,5` means 2 and 5 (two values), whatever your language settings.
 :::
 
+## Calculations
+
+Any length can be a calculation: add `+`, subtract `-`, multiply `*`, divide `/`, and use brackets. No calculator needed.
+
+| Type | Means |
+|---|---|
+| `2.5/3` | A third of 2.5 (in the model's unit) |
+| `12'6"+3/4"` | 12' 6 3/4" |
+| `(24'-0")/3` | 8' |
+| `2*450mm` | 900 mm |
+| `4+7/16` | 4 7/16" in a feet-and-inches model |
+| `3m-25cm` | 2.75 m |
+
+A bare number is in the model's unit when it is a length (`2.5/3` in a meter model is 0.833 m), and a plain factor when it multiplies or divides one (`2*450mm`). Angles and factors take calculations too: `90/2` is 45°. Two lengths multiplied make an area, not a length, so `2m*3m` is refused.
+
+If ModelCraft can't work it out, the status bar says what is wrong and where, for example "Division by zero (character 4)." A bracket also starts the value box, so you can begin with `(`.
+
+These keep their own meaning: `/3`, `3x` and `*3` after a copy, `24s` for sides, and `/3` with an edge selected (it [divides the edge](topic:divide)).
+
 ## Per tool
 
 | Tool | Label | Type |
@@ -48,6 +67,7 @@ Always use a **period** for decimals: `2.5m`. A comma separates two values, so `
 | {{ui:Rotate}} | {{ui:Angle}} | Degrees: `90`, `-45`, `22.5` |
 | {{ui:Scale}} | {{ui:Scale}} | A factor above 0: `2`, `0.5`, `1.25` |
 | {{ui:Tape}} | {{ui:Offset}} or {{ui:Length}} | A length |
+| {{ui:Divide}} | {{ui:Parts}} | How many equal parts: `5`, `5s` or `/5` (2 to 1000). See [Divide an edge or curve into equal parts](topic:divide) |
 | {{ui:Dimension}} | {{ui:Offset}}, then {{ui:Length}} | Where the dimension line goes; right after placing, a new length resizes the model |
 | {{ui:Select}} | {{ui:Value}} | With one dimension or edge selected, a new length resizes the model. See [Dimension and resize](topic:dimensions) |
 
@@ -77,7 +97,7 @@ A single typed length goes the way the pointer is pointing from the first click.
 
 ## The model's unit
 
-Change the unit in the picker at the bottom right: {{ui:ft and in}}, {{ui:in}}, {{ui:m}}, {{ui:cm}} or {{ui:mm}}. It changes how lengths are shown and how bare numbers are read; the model stays the same size. The unit is saved in the file.
+Change the unit in the picker at the bottom right: {{ui:ft and in}}, in, ft, yd, mi, mil, µm, mm, cm, m or km, as far as they are switched on in {{ui:Settings}} › {{ui:General}} › {{ui:Units}} (the model's own unit is always there). A length typed with any unit's mark is read in that unit. See [Units, typed values and the unit lists](common:unit-lists). It changes how lengths are shown and how bare numbers are read; the model stays the same size. The unit is saved in the file.
 
 How sizes are shown:
 
@@ -89,4 +109,4 @@ How sizes are shown:
 | cm | `320 cm` | cm² | cm³ |
 | mm | `3200 mm` | m² from 0.01 m², else mm² | m³ from 0.01 m³, else mm³ |
 
-A new model starts in feet and inches when the browser's language is set to a US region (and Liberia and Myanmar), and in millimeters everywhere else. To start in meters, change the picker after {{ui:New}}.
+A new model starts in feet and inches when the browser's language is set to a US region (and Liberia and Myanmar), and in millimeters everywhere else. A unit starred in {{ui:Settings}} › {{ui:General}} › {{ui:Units}} is used instead, when ModelCraft has it. Or change the picker after {{ui:New}}.

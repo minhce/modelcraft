@@ -13,6 +13,11 @@
  *   Push-pull   a menu bar (File, Edit, View, Camera, Draw, Tools, Window) and a row of the main tools, with the push-pull keys
  *   Modeler     a header menu bar (File, Edit, View, Select, Add, Object, Mesh) and the modeler key set: W select, G / R / S
  *               grab, rotate and scale at once, E push/pull, B rectangle, X delete, A select all, Shift+D duplicate, Ctrl+G group
+ *   Beginner    (0.7 LC.21, session print-07) a ribbon whose first tab is a few big buttons: shapes to drop, holes, move /
+ *               turn / size, align, Group (holes cut into the shapes), Check for 3D printing; every other tool on the next
+ *               tabs, small. Its own commands (group `beginner`, ui.inc's hidden [data-beginner] buttons, beginner-mc.js) are
+ *               `optional`, so no other style has to place them: every other style is unchanged. The right button orbits,
+ *               the middle pans.
  * These fold in ModelCraft's older "Keys" setting (Settings › ModelCraft, the status bar's Keys select, Edit › More): one
  * source of truth, the menu style. A style built on Modeler makes ModelCraft read keys the modeler way (settings.keys
  * 'blender'); every other style the push-pull way ('sketchup'); choosing a key set in the old places picks the matching
@@ -34,10 +39,13 @@ export const COMMANDS = [
   C('file.open', 'file', 'bi-folder2-open', A('open'), { defKeys: ['Ctrl+O'] }),
   C('file.save', 'file', 'bi-download', A('save'), { defKeys: ['Ctrl+S'] }),
   C('file.import', 'file', 'bi-box-arrow-in-down', A('import')),
+  C('file.saveas', 'file', 'bi-file-earmark-arrow-down', A('saveas'), { defKeys: ['Ctrl+Shift+S'] }),   // 0.7 XF.9 (session usd)
   C('export.glb', 'export', 'bi-box-arrow-up-right', X('glb')),
   C('export.dae', 'export', 'bi-box-arrow-up-right', X('dae')),
   C('export.obj', 'export', 'bi-box-arrow-up-right', X('obj')),
   C('export.stl', 'export', 'bi-box-arrow-up-right', X('stl')),
+  C('export.ply', 'export', 'bi-box-arrow-up-right', X('ply')),   // 0.7 XF.3's PLY (session interchange; registered by session usd)
+  C('export.usd', 'export', 'bi-box-arrow-up-right', X('usd')),   // 0.7 XF.8 (session usd)
   C('export.print3d', 'export', 'bi-printer', X('print3d')),
   C('export.ifc', 'export', 'bi-building', X('ifc')),
   C('export.storeys', 'export', 'bi-layers', A('storeys')),
@@ -48,6 +56,8 @@ export const COMMANDS = [
   C('export.pdf', 'export', 'bi-file-earmark-pdf', X('pdf')),
   C('export.print', 'export', 'bi-printer', X('print')),
   C('export.render', 'export', 'bi-camera', X('render')),
+  C('export.live', 'export', 'bi-play-btn', X('live'), { label: 'rt.menu' }),   // 0.7 RT.3 (session realtime): the live view
+  C('export.live-window', 'export', 'bi-window-stack', X('live-window'), { label: 'rt.menu.window' }),
   C('export.video', 'export', 'bi-camera-reels', X('video')),   // 0.6 LC.10 (session lc-model)
 
   C('draw.line', 'draw', 'bi-slash-lg', TL('line'), { defKeys: ['L'] }),
@@ -70,6 +80,7 @@ export const COMMANDS = [
   C('modify.erase', 'modify', 'bi-eraser', TL('erase'), { defKeys: ['E'] }),
   C('modify.tape', 'modify', 'bi-rulers', TL('tape'), { defKeys: ['T'] }),
   C('modify.protractor', 'modify', 'bi-compass', TL('protractor')),
+  C('modify.divide', 'modify', 'bi-distribute-horizontal', TL('divide')),   // 0.7 MC-DIVIDE
   C('modify.dim', 'modify', 'bi-arrow-left-right', TL('dim'), { defKeys: ['D'] }),
 
   C('organize.component', 'organize', 'bi-boxes', A('component'), { defKeys: ['G'] }),
@@ -129,6 +140,14 @@ export const COMMANDS = [
   C('camera.vr', 'camera', 'bi-headset-vr', '.mc-tools [data-xr-enter]'),   // 0.6 LC.19
   C('camera.guide', 'camera', 'bi-signpost-2', '.mc-tools [data-guide-open]'),   // 0.6 LC.21
 
+  // 0.7 LC.21 (session print-07): the Beginner style's own commands (hidden buttons in ui.inc; beginner-mc.js does the work)
+  ...[['box', 'bi-box'], ['cylinder', 'bi-database'], ['sphere', 'bi-circle-fill'], ['cone', 'bi-triangle'], ['roof', 'bi-house'],
+    ['hole-box', 'bi-square-half'], ['hole-cylinder', 'bi-circle-half'], ['hole', 'bi-dash-square-dotted'], ['solid', 'bi-square-fill'],
+    ['group', 'bi-collection'], ['align-left', 'bi-align-start'], ['align-centerx', 'bi-align-center'], ['align-right', 'bi-align-end'],
+    ['align-front', 'bi-align-top'], ['align-centery', 'bi-align-middle'], ['align-back', 'bi-align-bottom'],
+    ['align-bottom', 'bi-arrow-bar-down'], ['align-centerz', 'bi-distribute-vertical'], ['align-top', 'bi-arrow-bar-up'], ['drop', 'bi-download']]
+    .map(([id, icon]) => C('beginner.' + id, 'beginner', icon, `.mc-tools [data-beginner="${id}"]`, { optional: true })),
+
   C('aids.snap', 'aids', 'bi-magnet', '[data-mc-toggle="snap"]'),
   C('aids.collide', 'aids', 'bi-bricks', '[data-mc-toggle="collide"]'),
 
@@ -136,7 +155,7 @@ export const COMMANDS = [
   C('app.palette', 'app', 'bi-search', '[data-palette-open]', { defKeys: ['Ctrl+K'], keyOnly: true }),
   C('app.help', 'app', 'bi-question-circle', '[data-help-open]', { defKeys: ['F1'], keyOnly: true }),
 ];
-export const GROUPS = ['file', 'export', 'draw', 'modify', 'organize', 'edit', 'camera', 'aids', 'app'];
+export const GROUPS = ['file', 'export', 'draw', 'modify', 'organize', 'edit', 'camera', 'aids', 'app', 'beginner'];
 
 // ModelCraft's own keys = the registry's (the push-pull key set; what the app does with no profile at all)
 const DEFAULT_KEYS = Object.fromEntries(COMMANDS.filter((c) => c.defKeys.length && !c.fixed).map((c) => [c.id, c.defKeys.slice()]));
@@ -165,11 +184,30 @@ export const KEYSETS = {
 };
 
 const m = (label, items) => ({ label: 'input.m.' + label, items });
-const EXPORTS = ['export.glb', 'export.dae', 'export.obj', 'export.stl', 'export.ifc', 'export.storeys', 'export.dwg', 'export.dxf'];
+const EXPORTS = ['export.glb', 'export.dae', 'export.obj', 'export.stl', 'export.ply', 'export.usd', 'export.ifc', 'export.storeys', 'export.dwg', 'export.dxf'];
 const IMAGES = ['export.png', 'export.png2', 'export.pdf', 'export.print', 'export.print3d', 'export.render', 'export.video'];
 const FLIPS = ['edit.flip-x', 'edit.flip-y', 'edit.flip-z', 'edit.flipcopy-x', 'edit.flipcopy-y', 'edit.flipcopy-z'];
 const VIEWS = ['camera.iso', 'camera.top', 'camera.front', 'camera.right', 'camera.back', 'camera.left', 'camera.bottom'];
 const APP = ['app.settings', 'app.palette', 'app.help'];
+// the Beginner style (0.7 LC.21): a ribbon tab of big buttons, then every other tool, small, by group
+const rtab = (label, panels) => ({ label: 'input.m.' + label, panels: panels.map(([l, items, more]) => ({ label: 'input.m.' + l, items, ...(more ? { more } : {}) })) });
+const B = (id) => 'beginner.' + id;
+const BEGINNER_MAKE = [
+  ['b-shapes', [B('box'), B('cylinder'), B('sphere'), B('cone'), B('roof')]],
+  ['b-holes', [{ id: B('hole-box'), size: 'lg' }, { id: B('hole-cylinder'), size: 'lg' }, { id: B('hole'), size: 'sm' }, { id: B('solid'), size: 'sm' }]],
+  ['b-arrange', [{ id: 'modify.select', size: 'lg' }, { id: 'modify.move', size: 'lg' }, { id: 'modify.rotate', size: 'lg' }, { id: 'modify.scale', size: 'lg' },
+    { split: [B('align-left'), B('align-centerx'), B('align-right')], size: 'sm' }, { split: [B('align-front'), B('align-centery'), B('align-back')], size: 'sm' },
+    { split: [B('align-bottom'), B('align-centerz'), B('align-top')], size: 'sm' }, { id: B('drop'), size: 'sm' }]],
+  ['b-group', [{ id: B('group'), size: 'lg' }, { id: 'organize.explode', size: 'sm' }, { id: 'edit.delete', size: 'sm' }]],
+  ['b-check', ['export.print3d']],
+];
+const BEGINNER_FILE = ['file.new', 'file.open', 'file.save', 'file.saveas', '-', 'file.import', '-', ...EXPORTS, '-', ...IMAGES, '-', ...APP];
+const BEGINNER_VIEW = [['b-camera', ['camera.orbit', 'camera.pan', 'camera.zoom', 'camera.extents']], ['b-views', [...VIEWS, 'camera.persp'].map((id) => ({ id, size: 'sm' }))]];
+function beginnerRest() {
+  const placed = new Set([...BEGINNER_FILE, ...[...BEGINNER_MAKE, ...BEGINNER_VIEW].flatMap(([, items]) => items.flatMap((it) => (typeof it === 'string' ? [it] : it.split || [it.id])))]);
+  const rest = COMMANDS.filter((c) => !c.keyOnly && !c.optional && !placed.has(c.id));
+  return ['draw', 'modify', 'organize', 'edit', 'camera', 'aids', 'export'].map((g) => ['b-' + g, rest.filter((c) => c.group === g).map((c) => ({ id: c.id, size: 'sm' }))]).filter(([, items]) => items.length);
+}
 
 export const STYLES = {
   modelcraft: {
@@ -180,12 +218,12 @@ export const STYLES = {
   pushpull: {
     format: 'cadcraft-input', version: 1, id: 'pushpull', name: 'input.style.pushpull', builtin: true, layout: 'menubar',
     menus: [
-      m('file', ['file.new', 'file.open', 'file.save', '-', 'file.import', '-', ...EXPORTS, '-', ...IMAGES, '-', ...APP]),
+      m('file', ['file.new', 'file.open', 'file.save', 'file.saveas', '-', 'file.import', '-', ...EXPORTS, '-', ...IMAGES, '-', ...APP]),
       m('edit', ['edit.undo', 'edit.redo', '-', 'edit.cut', 'edit.copy', 'edit.paste', 'edit.paste-in-place', 'edit.duplicate', 'edit.delete', '-', 'edit.select-all', 'edit.select-none', '-', 'edit.hide', 'edit.isolate', 'edit.unhide-all', '-', 'organize.component', 'organize.group', 'organize.explode', '-', 'edit.intersect-model', 'edit.intersect-sel']),
-      m('view', ['camera.present', '-', 'camera.sec-planes', 'camera.sec-cuts', '-', 'camera.timeline', 'camera.vr', 'camera.guide']),
+      m('view', ['camera.present', '-', 'camera.sec-planes', 'camera.sec-cuts', '-', 'camera.timeline', 'camera.vr', 'camera.guide', '-', 'export.live', 'export.live-window']),
       m('camera', ['camera.orbit', 'camera.pan', 'camera.zoom', 'camera.extents', '-', ...VIEWS, '-', 'camera.persp']),
       m('draw', ['draw.line', 'draw.arc', 'draw.arcc', 'draw.curve', '-', 'draw.rect', 'draw.circle', 'draw.polygon']),
-      m('tools', ['modify.select', 'modify.erase', 'modify.paint', '-', 'modify.move', 'modify.push', 'modify.rotate', 'modify.follow', 'modify.scale', 'modify.offset', '-', 'organize.union', 'organize.subtract', 'organize.intersect', '-', ...FLIPS, '-', 'modify.tape', 'modify.dim', 'modify.protractor', 'draw.text3d', 'edit.axes-place', 'edit.axes-face', 'edit.axes-reset', '-', 'camera.section', '-', 'edit.terrain-contours', 'edit.terrain-grid', 'edit.sculpt']),
+      m('tools', ['modify.select', 'modify.erase', 'modify.paint', '-', 'modify.move', 'modify.push', 'modify.rotate', 'modify.follow', 'modify.scale', 'modify.offset', 'modify.divide', '-', 'organize.union', 'organize.subtract', 'organize.intersect', '-', ...FLIPS, '-', 'modify.tape', 'modify.dim', 'modify.protractor', 'draw.text3d', 'edit.axes-place', 'edit.axes-face', 'edit.axes-reset', '-', 'camera.section', '-', 'edit.terrain-contours', 'edit.terrain-grid', 'edit.sculpt']),
       m('window', ['aids.snap', 'aids.collide', '-', 'edit.keys-pushpull', 'edit.keys-modeler']),
     ],
     bar: ['modify.select', 'modify.erase', 'modify.paint', '-', 'draw.line', 'draw.arc', 'draw.rect', 'draw.circle', '-', 'modify.push', 'modify.move', 'modify.rotate', 'modify.scale', 'modify.offset', '-', 'modify.tape', 'modify.dim', '-', 'camera.orbit', 'camera.pan', 'camera.zoom', 'camera.extents', '-', 'edit.undo', 'edit.redo'],
@@ -195,26 +233,35 @@ export const STYLES = {
   modeler: {
     format: 'cadcraft-input', version: 1, id: 'modeler', name: 'input.style.modeler', builtin: true, layout: 'menubar',
     menus: [
-      m('file', ['file.new', 'file.open', 'file.save', '-', 'file.import', '-', ...EXPORTS, '-', ...IMAGES, '-', ...APP]),
+      m('file', ['file.new', 'file.open', 'file.save', 'file.saveas', '-', 'file.import', '-', ...EXPORTS, '-', ...IMAGES, '-', ...APP]),
       m('edit', ['edit.undo', 'edit.redo', '-', 'edit.cut', 'edit.copy', 'edit.paste', 'edit.paste-in-place', '-', 'aids.snap', 'aids.collide', '-', 'edit.keys-pushpull', 'edit.keys-modeler']),
-      m('view', ['camera.orbit', 'camera.pan', 'camera.zoom', 'camera.extents', '-', ...VIEWS, '-', 'camera.persp', 'camera.present', '-', 'camera.sec-planes', 'camera.sec-cuts', '-', 'camera.timeline', 'camera.vr', 'camera.guide']),
+      m('view', ['camera.orbit', 'camera.pan', 'camera.zoom', 'camera.extents', '-', ...VIEWS, '-', 'camera.persp', 'camera.present', '-', 'camera.sec-planes', 'camera.sec-cuts', '-', 'camera.timeline', 'camera.vr', 'camera.guide', '-', 'export.live', 'export.live-window']),
       m('select', ['modify.select', 'edit.select-all', 'edit.select-none', '-', 'edit.hide', 'edit.isolate', 'edit.unhide-all']),
       m('add', ['draw.line', 'draw.arc', 'draw.arcc', 'draw.curve', 'draw.rect', 'draw.circle', 'draw.polygon', 'draw.text3d', '-', 'modify.tape', 'modify.protractor', 'modify.dim', 'camera.section']),
       m('object', ['modify.move', 'modify.rotate', 'modify.scale', '-', 'edit.duplicate', 'edit.delete', '-', ...FLIPS, '-', 'organize.group', 'organize.component', 'organize.explode', '-', 'organize.union', 'organize.subtract', 'organize.intersect', '-', 'edit.axes-place', 'edit.axes-face', 'edit.axes-reset']),
-      m('mesh', ['modify.push', 'modify.follow', 'modify.offset', 'modify.erase', 'modify.paint', '-', 'edit.intersect-model', 'edit.intersect-sel', '-', 'edit.terrain-contours', 'edit.terrain-grid', 'edit.sculpt']),
+      m('mesh', ['modify.push', 'modify.follow', 'modify.offset', 'modify.divide', 'modify.erase', 'modify.paint', '-', 'edit.intersect-model', 'edit.intersect-sel', '-', 'edit.terrain-contours', 'edit.terrain-grid', 'edit.sculpt']),
     ],
     bar: ['modify.select', 'modify.move', 'modify.rotate', 'modify.scale', '-', 'modify.push', 'draw.line', 'draw.rect', 'draw.circle', '-', 'modify.tape', 'modify.dim', '-', 'camera.orbit', 'camera.pan', 'camera.zoom', 'camera.extents', '-', 'edit.undo', 'edit.redo'],
-    labels: { 'modify.move': 'input.lbl.modeler.move', 'modify.push': 'input.lbl.modeler.push' },
+    labels: { 'modify.move': 'input.lbl.modeler.move', 'modify.push': 'input.lbl.modeler.push', 'modify.divide': 'input.lbl.modeler.divide' },
     keys: MODELER_KEYS,
     // the middle button orbits (Shift + middle pans, Ctrl + middle zooms); the right button belongs to the tool (it cancels)
     mouse: { wheel: 1, zoomSpeed: 1, pan2d: ['middle'], orbit3d: { left: 'none', middle: 'orbit', right: 'none' } },
   },
+  beginner: {
+    format: 'cadcraft-input', version: 1, id: 'beginner', name: 'input.style.beginner', builtin: true, layout: 'ribbon',
+    menus: [m('file', BEGINNER_FILE)],
+    quick: ['file.new', 'file.open', 'file.save', 'edit.undo', 'edit.redo'],
+    tabs: [rtab('b-make', BEGINNER_MAKE), rtab('b-view', BEGINNER_VIEW), rtab('b-more', beginnerRest())],
+    keys: { ...DEFAULT_KEYS },
+    // the right button orbits and the middle pans, as most beginner 3D tools do; the wheel zooms
+    mouse: { wheel: 1, zoomSpeed: 1, pan2d: ['middle', 'right'], orbit3d: { left: 'none', middle: 'pan', right: 'orbit' } },
+  },
 };
-export const STYLE_ORDER = ['modelcraft', 'pushpull', 'modeler'];
+export const STYLE_ORDER = ['modelcraft', 'pushpull', 'modeler', 'beginner'];
 
 /** IP.4: each style's family. Push-pull is the menu-bar member; Modeler has no counterpart in the other apps (no family:
  *  "Use this style in every app" is off for it). */
-export const FAMILY = { modelcraft: 'own', pushpull: 'menus' };
+export const FAMILY = { modelcraft: 'own', pushpull: 'menus' };   // Beginner (0.7 LC.21) has no counterpart in the other apps either
 export const STORE = 'modelcraft.input';
 
 /** The key set (settings.keys) a style stands for: Modeler and the person's styles built on it → 'blender'. */
@@ -241,6 +288,11 @@ export function hooks() {
       if (!id) return false;
       if (id === '*') return true;
       return (p.keys?.[id] || []).includes(combo);
+    },
+    // 0.7 LC.21: the Beginner style's own commands are hidden buttons (data-input-only): hidden is not "off" for them
+    why(cmd, b, generic) {
+      if (b && b.hasAttribute('data-input-only') && !b.disabled && b.getAttribute('aria-disabled') !== 'true') return '';
+      return generic(cmd, b);
     },
     mouse(mm) {
       setMouse(mm);

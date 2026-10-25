@@ -46,6 +46,20 @@ While a component is open, every copy of it changes as you work.
 
 {{ui:Components}} shows how many copies are placed ("4×"), and the {{ui:Outliner}} shows the count after the name.
 
+## Rearrange in the Outliner
+
+Drag a row in the {{ui:Outliner}} to change where it belongs. Nothing moves in the view: a group keeps its place in the model.
+
+- **Into a group:** drop it on the middle of a group's row (the row gets a dashed outline). It goes inside, last.
+- **In a different order:** drop it on the top or bottom edge of a row (a line shows there). It goes just before or after that row, inside the same group as that row, so this also puts it into a group at a chosen place.
+- **Out to the top level:** drop it on the {{ui:Outliner}} heading. It goes last.
+
+Each drop is one step: {{key:Mod+Z}} puts it back. {{key:Esc}} during a drag drops nothing. A group can't go inside itself or inside a group it holds. Dragging is off while {{ui:Find by name}} has text in it.
+
+:::touch
+Hold a finger on a row for a moment, then drag it. A quick swipe scrolls the list instead.
+:::
+
 ## Make one copy different
 
 Select the copy and click {{ui:Make unique}} in {{ui:Entity info}} (shown when the component is placed more than once). That copy gets its own definition, named like the original with a new number. Edit it without touching the others.

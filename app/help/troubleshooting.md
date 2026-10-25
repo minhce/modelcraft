@@ -101,10 +101,16 @@ Press {{key:O}} for {{ui:Orbit}} and drag, or use the arrow keys. See [Orbit, pa
 
 | Message | What to do |
 |---|---|
-| "ModelCraft imports Collada (.dae), OBJ, glTF (.glb/.gltf), DWG and DXF. … is none of these." | Export the model from the other program in one of these formats |
+| "ModelCraft imports SketchUp (.skp), Collada (.dae), OBJ, glTF (.glb/.gltf), FBX, PLY, STL, Alembic (.abc), DWG and DXF. … is none of these." | Export the model from the other program in one of these formats |
 | "This file is over 300 MB." | Simplify or split the model in the other program |
 | "…too big to model with here (over 2 million vertices)." | The same |
-| "This glTF file keeps its data in a separate file…" | Export it as a single `.glb` |
+| "This .gltf file needs "…"…" | Drop the `.gltf` together with its `.bin` and texture files, or open the `.glb` version |
+| "This glTF file needs the … extension, which ModelCraft does not read yet." | Export again from the other program without that extension (KTX2 textures, for one) |
+| An OBJ comes in without its colors or textures | Drop the `.obj` together with its `.mtl` and pictures |
+| "This Alembic file uses the old HDF5 layout…" | Save it again from the other program as an Ogawa Alembic file |
+| An FBX comes in without its textures | Drop the `.fbx` together with its texture pictures, or embed the media when exporting |
+| "This FBX file is version …, which ModelCraft does not read" | Export again as FBX 2011 or newer |
+| An STL or PLY comes in 1,000 times too big or too small | STL is read as millimeters and PLY as meters: scale it (see [Rotate and scale](topic:rotate-scale#fix-an-import-that-came-in-the-wrong-size)) |
 | "This is not a Collada (.dae) file…" or "…not well-formed XML…" | The file is damaged or not Collada. Export it again |
 | "This Collada file has no geometry ModelCraft can import." | It holds only cameras, lights or references to other files |
 | "This is a binary DXF. Save it as ASCII DXF and try again." | Save it again from the CAD program as ASCII |
@@ -129,7 +135,7 @@ Press {{key:O}} for {{ui:Orbit}} and drag, or use the arrow keys. See [Orbit, pa
 
 ## I lost work
 
-ModelCraft does not save by itself. When you close or reload a tab with unsaved changes, the browser asks first ("Leave site?" or "Reload site?"); choose to stay and save. New and Open ask too ("Unsaved changes"). If the browser or computer crashed, the work since your last save is gone. Save often with {{key:Mod+S}}.
+ModelCraft does not save to a file by itself. When you close or reload a tab with unsaved changes, the browser asks first ("Leave site?" or "Reload site?"); choose to stay and save. New and Open ask too ("Unsaved changes"). If the browser or computer crashed, open ModelCraft again in the same browser: it offers the unsaved work back ("Recover your work?"; see [Recover your work](common:recover)). Save often with {{key:Mod+S}}.
 
 ## My downloads folder fills up with copies
 
@@ -137,7 +143,7 @@ Each save is a new download, named `Untitled (1).modelcraft`, `Untitled (2).mode
 
 ## It gets slow
 
-- Every step of undo keeps a full copy of the model, so on a very large import each edit takes longer. Explode or erase what you don't need, save, and reopen: reopening also clears the undo history.
+- Every step of undo keeps a copy of the model (a [mesh](topic:meshes) keeps only what changed), so on a very large import of push/pull geometry each edit takes longer. Explode or erase what you don't need, save, and reopen: reopening also clears the undo history.
 - Sun shadows cost the most. Untick {{ui:Sun shadows}} while you model.
 
 ## No shadows

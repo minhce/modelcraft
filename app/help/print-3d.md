@@ -3,7 +3,7 @@ title: Get a model ready for 3D printing
 summary: Check that a model is closed and faces the right way, see its size, base and overhangs, fix what is wrong, and download it as STL or 3MF for your slicer.
 section: tasks
 order: 102
-keywords: 3d print, 3d printing, printer, print, slicer, stl, 3mf, watertight, closed, manifold, solid, holes, inside out, overhang, supports, base, bed, millimeters, export, fix, repair, hollow, bed size, beginner
+keywords: 3d print, 3d printing, printer, print, slicer, stl, 3mf, watertight, closed, manifold, solid, holes, inside out, overhang, supports, base, bed, millimeters, export, fix, repair, hollow, bed size, beginner, wall thickness, print tools
 ---
 
 A 3D printer's slicer needs a closed shape: no holes, every face pointing out, nothing passing through itself. {{ui:Export}} › {{ui:Check for 3D printing (STL or 3MF)…}} looks for exactly that before you download the file.
@@ -52,16 +52,22 @@ Under **Where the problems are**, the dialog names each group or component that 
 - {{ui:Show}} opens that group and selects the edges and faces that are wrong, so they show highlighted.
 - {{ui:Fix what can be fixed}} fixes all of them at once: it closes holes whose edges lie flat, removes faces inside the shape and stray edges, and turns faces the right way out. It is one step: {{key:Mod+Z}} undoes it. The check then runs again and shows what is left.
 
-What it can't fix (a hole whose edges don't lie flat, a part passing through itself) stays in the list with what to do by hand. You can also fix one group at a time: select it, then use {{ui:Show problems}} and {{ui:Fix}} in {{ui:Entity info}}. See [Solid tools](topic:solids).
+What it can't fix (a hole whose edges don't lie flat, a part passing through itself) stays in the list with what to do by hand. {{ui:Repair}} under **Print tools** goes further: it closes holes that aren't flat, removes stray pieces and doubled faces, and lists every fix. See [Supports, wall thickness, hollowing and repair](topic:print-tools#repair). You can also fix one group at a time: select it, then use {{ui:Show problems}} and {{ui:Fix}} in {{ui:Entity info}}. See [Solid tools](topic:solids).
 
 ## A hollow part
 
-To make a part hollow, draw the hollow as a closed group inside the part, not touching it, and reverse all its faces so they face into the hollow. The check counts it as a hollow and takes its volume away; it is not listed as something to fix.
+{{ui:Hollow}} under **Print tools** hollows a part to the wall thickness you give, with drain holes where you click. See [Hollow](topic:print-tools#hollow).
+
+You can also draw the hollow yourself: a closed group inside the part, not touching it, with all its faces reversed so they face into the hollow. The check counts it as a hollow and takes its volume away; it is not listed as something to fix.
 
 ## Your printer's bed
 
 Choose your printer's bed size in {{ui:Settings}} › {{ui:ModelCraft}} › {{ui:3D printer bed}}. The check then warns when the model is larger than the bed, turned either way on it. See [Settings](topic:settings#3d-printer-bed).
 
+## Print tools
+
+Under the dialog's findings, **Print tools** opens {{ui:Supports preview}} (where supports go and about how much), {{ui:Wall thickness}} (walls too thin to print), {{ui:Hollow}} and {{ui:Repair}}. See [Supports, wall thickness, hollowing and repair](topic:print-tools).
+
 ## Not checked
 
-The check does not look at wall thickness or tiny details your nozzle cannot draw, and it does not show where supports go. Your slicer's preview shows those. See [Not built yet](topic:not-built-yet#3d-printing).
+The check does not slice: tiny details your nozzle cannot draw and the real supports are your slicer's. See [Not built yet](topic:not-built-yet#3d-printing).

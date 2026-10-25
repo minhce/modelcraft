@@ -23,6 +23,10 @@ When there is no headset, {{ui:Review in VR}} is greyed out and says why.
 
 The menu is on the back of your left hand. Point at it with the right controller and pull the trigger to pick a button. (With one hand only, the menu floats in front of where you started.)
 
+## What it looks like
+
+The headset shows the model in the [live view's](topic:live-view) look: the looks and materials you gave the faces, the sky and the sun from your model's place and date with its shadow, lamps, scattered plants and rocks, and light bounced off walls and floors (worked out on this computer while you look round, and following you as you move). Brightness and the view transform (ACES or AgX) are those of [Render a picture](topic:render). How much it draws depends on what the headset's browser has, as on the desktop; ambient occlusion, reflections and bloom stay on the desktop.
+
 ## Move around
 
 - **Jump:** in {{ui:Move}}, point at a floor and pull the trigger; you land there. Or push the stick forward to aim, and let go to jump. You can only land on floors and ground (surfaces facing up), never on a wall.
@@ -65,5 +69,5 @@ In a [live session](topic:work-live), everyone in VR sees the others as a head a
 Pick {{ui:Leave VR}} (or take the headset off and end it there). The view on the screen moves to where your head was.
 
 :::note
-Tested with a headset emulator, not yet on every headset. A large model can make the headset stutter: hide what you don't need first ([hide and isolate](topic:hide-isolate)).
+Tested with a headset emulator only, not yet with a real headset. A large model can make the headset stutter: hide what you don't need first ([hide and isolate](topic:hide-isolate)).
 :::

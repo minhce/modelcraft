@@ -114,6 +114,11 @@ body.app-shell .sp-tab { bottom: 3.25rem; }
 .mc-tree-search { width: 100%; margin: .25rem 0 .375rem; }
 .mc-node.is-match .nm { font-weight: 600; }
 .mc-node.is-drop, [data-tree-top].is-drop { outline: 2px dashed var(--layer-blue); outline-offset: -2px; }
+/* 0.6.1: a drop between rows (the order) shows as a line on that edge of the row */
+.mc-node.is-drop-before { box-shadow: inset 0 2px 0 var(--layer-blue); }
+.mc-node.is-drop-after { box-shadow: inset 0 -2px 0 var(--layer-blue); }
+.mc-tree .mc-node { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.mc.mc-tree-dragging, .mc.mc-tree-dragging .mc-node { cursor: grabbing; }
 .mc-tree-name { min-width: 0; flex: 1 1 auto; padding-block: 0; }
 .mc.is-touch .mc-tree .mc-eye { min-width: 2.25rem; min-height: 2.25rem; }
 /* IFC storeys dialog (0.4 M12): name, elevation, remove */
@@ -164,7 +169,12 @@ body.app-shell .sp-tab { bottom: 3.25rem; }
   padding: .75rem 1rem; font-size: .875rem; background: var(--sheet-2);
   border: var(--pen-2) solid var(--ink); border-radius: var(--radius); pointer-events: none;
 }
+.mc-hint-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; margin-bottom: .35rem; }
+.mc-hint-head .mc-hint-h { margin: 0; }
 .mc-hint-h { margin: 0 0 .35rem; font-weight: 700; font-stretch: 112%; }
+.mc-hint-close { pointer-events: auto; padding: .15rem .35rem; font-size: .8125rem; line-height: 1; color: var(--ink); background: transparent; border: var(--pen-1) solid transparent; border-radius: var(--radius); cursor: pointer; }
+.mc-hint-close:hover { border-color: var(--line); background: var(--sheet); }
+.mc-hint-close:focus-visible { outline: var(--pen-3) solid var(--action); outline-offset: 1px; }
 .mc-hint ul { margin: 0; padding-left: 1.1rem; }
 .mc-hint li + li { margin-top: .2rem; }
 .mc-drop {
@@ -286,6 +296,14 @@ body.app-shell .sp-tab { bottom: 3.25rem; }
 .mc-guide-list { margin: 0 0 .6rem; padding-left: 1.2rem; color: var(--ink-2); font-size: .8125rem; }
 .mc-guide-list .is-done { text-decoration: line-through; }
 .mc-guide-list .is-now { color: var(--ink); font-weight: 700; }
+/* 3D-print tools card (0.7 LC.21, print-ui.js): the guide's card, with a few fields */
+.mc-ptool { max-height: calc(100% - 2rem); overflow: auto; }
+.mc-ptool-row { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .9rem; margin: 0 0 .5rem; padding: 0; border: 0; }
+.mc-ptool-row legend { float: left; margin: 0 .25rem 0 0; padding: 0; font-size: inherit; }
+.mc-ptool-num input { width: 5rem; }
+.mc-ptool-list { margin: 0 0 .5rem; padding-left: 1.2rem; }
+.mc-ptool .mc-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.mc-prep-tools { display: flex; flex-wrap: wrap; gap: .25rem .9rem; align-items: baseline; }
 /* Lights (0.5 RC.11 (d)) */
 .mc-lights-add { display: flex; flex-wrap: wrap; gap: .375rem; margin-bottom: .5rem; }
 .mc-lights li { display: flex; align-items: center; gap: .35rem; }
@@ -326,6 +344,15 @@ body.app-shell .sp-tab { bottom: 3.25rem; }
   .mc-timeline { --tl-name: 6rem; }
   .mc-tl-head .mc-tool span { display: none; }
 }
+/* 0.6.1 FIX-TIMELINE-PHONE: on a phone (app-phone.js) the timeline sits under the view; its controls are one row that scrolls
+   sideways and the rows scroll inside a shorter box, so the view keeps most of the screen */
+html.cc-phone .mc-tl-head { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+html.cc-phone .mc-tl-head > * { flex: 0 0 auto; }
+html.cc-phone .mc-tl-head [data-tl-close] { position: sticky; right: 0; background: var(--sheet-2); }
+html.cc-phone .mc-tl-head .mc-tool { min-height: 2.5rem; min-width: 2.5rem; justify-content: center; }
+html.cc-phone .mc-tl-time { min-width: 0; }
+html.cc-phone .mc-tl-lanes { max-height: 6.5rem; }
+html.cc-compact.cc-land .mc-tl-lanes { max-height: 4rem; }
 
 /* ---- Issues (0.6 LC.19, xr-mc.js): placed in VR, each with its picture ---- */
 .mc-issues li { grid-template-columns: 3.5rem minmax(0, 1fr) auto; align-items: center; }
@@ -334,3 +361,44 @@ body.app-shell .sp-tab { bottom: 3.25rem; }
 .mc-issue-text strong, .mc-issue-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mc-issue-text small { color: var(--ink-2); }
 .mc-tools [data-xr-enter][aria-disabled="true"] { color: var(--ink-2); }
+
+/* 0.7 workspaces (workspaces.js) and the Mesh workspace (ws-mesh.js) */
+.mc-tool-group[hidden] { display: none; }
+.mc-ws-group .mc-tool-row { align-items: center; }
+.mc-ws-select { min-width: 7rem; }
+.mc-ws-panel { display: flex; flex-direction: column; gap: .5rem; }
+.mc-ws-panel .mc-seg { display: flex; gap: .25rem; flex-wrap: wrap; }
+.mc-ws-panel .mc-seg [aria-pressed="true"] { background: var(--action); color: var(--on-action); border-color: var(--action); }
+.mc-ws-panel .mc-check { display: flex; gap: .4rem; align-items: center; }
+.mc-ws-panel .mc-mesh-add { display: flex; flex-wrap: wrap; gap: .3rem; }
+.mc-tools [data-cmd]:disabled { opacity: .45; }
+/* 0.7 MD.3: the modifier stack (mesh/mod-panel.js) */
+.mc-mods { display: flex; flex-direction: column; gap: .5rem; }
+.mc-mod { border-top: var(--pen-1) solid var(--line); padding-top: .4rem; display: flex; flex-direction: column; gap: .3rem; }
+.mc-mod-head { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
+.mc-mod-head .mc-mod-name { flex: 1 1 auto; min-width: 6rem; font-weight: 600; }
+.mc-mod-head .mc-linkbtn[aria-pressed="false"] { opacity: .45; }
+.mc-mod-props { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: .3rem .5rem; align-items: center; }
+.mc-mod-props .v > * { width: 100%; }
+.mc-mod-props .mc-note { grid-column: 1 / -1; margin: 0; }
+/* 0.7 MD.5: the UV workspace — the 3D view on the left, the UV editor on the right */
+.mc-stage-uv .mc-canvas { width: 50%; }
+.mc-uv { position: absolute; top: 0; right: 0; bottom: 0; width: 50%; border-left: var(--pen-2) solid var(--line); background: var(--sheet-2); }
+.mc-uv-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.mc-uv-canvas:focus-visible { outline: var(--pen-2) solid var(--action); outline-offset: -2px; }
+.mc-stage-uv .cc-vc.at-top-right, .mc-stage-uv .cc-axes.at-top-right { right: calc(50% + .5rem); }
+.mc-stage-uv .cc-vc.at-bottom-right, .mc-stage-uv .cc-axes.at-bottom-right { right: calc(50% + .5rem); }
+.mc-stage-uv .mc-scenebar { right: 50%; }
+
+/* ---- Workspace layouts (0.7 WS.9, session ws-modelcraft; the shell's engine, workspace-modelcraft.js) ----
+   Only what ModelCraft's own controls need in the engine's blocks: the Faces select and the units keep their own width in a bar,
+   the browser palette (Scenes, Components, Tags) at the palettes' text size, as the engine does for the panel's own content. */
+:is(.ws-view-controls, .tbx-quick, .tbx-info) .mc-select { width: auto; flex: 0 0 auto; }
+/* the view's canvases sit between the blocks (the engine sizes a canvas under .ws-fill); the UV workspace's editor takes the right half
+   of that same box */
+.mc-stage-uv.ws-stage > .mc-canvas.ws-fill { width: calc((100% - var(--ws-sl, 0px) - var(--ws-sr, 0px)) / 2) !important; }
+.mc-stage-uv.ws-stage > .mc-uv { top: calc(var(--ws-st, 0px) + var(--ws-vt, 0px)); bottom: calc(var(--ws-sb, 0px) + var(--ws-vb, 0px)); right: var(--ws-sr, 0px); width: calc((100% - var(--ws-sl, 0px) - var(--ws-sr, 0px)) / 2); }
+.mc-lay-browser { zoom: .85; }
+.ws-status-slot > .mc-status { display: flex; gap: .75rem; }
+.ws-status-slot .mc-vcb-input { width: 8rem; font-size: .75rem; }
+.ws-palette-scroll > [data-info] { zoom: .85; padding: .5rem .75rem; }

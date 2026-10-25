@@ -10,6 +10,7 @@
  *   snap      snap to points, edges and axes (default on; also the Snap button in the status bar)
  *   collide   solids stop where they touch instead of passing through (default on; also the status bar button)
  *   corner    corner indicator: view cube (default) / axis icon / none
+ *   (no key) Rendering › Your machine: read-only, filled by compute-mc.js (0.7 CU.1)
  *   bed       3D printer bed for Check for 3D printing: '' (not set, default) / 180 / 220 / 256 / 300 (printprep.js BEDS)
  * Product names here only describe whose controls these resemble (nominative, plain text).
  */
@@ -62,6 +63,22 @@
     <?php endforeach; ?>
   </div>
   <p class="shell-hint-text"><?= Lang::e('set.printbed.hint') ?></p>
+</fieldset>
+<?php /* 0.7: the first-model tour (the guided first model, 0.6 LC.21): again now, and whether it starts by itself the first time */ ?>
+<fieldset class="shell-set">
+  <legend><?= Lang::e('set.tour') ?></legend>
+  <p><button type="button" class="btn-line btn-sm-cc" data-set-tour><?= Lang::e('set.tour.again') ?></button></p>
+  <p class="shell-hint-text"><?= Lang::e('set.tour.hint') ?></p>
+  <label class="shell-check"><input type="checkbox" name="mcTourAuto" data-tour-auto> <?= Lang::e('set.tour.auto') ?></label>
+  <p class="shell-hint-text"><?= Lang::e('set.tour.auto.hint') ?></p>
+</fieldset>
+<?php /* 0.7 CU.1 (session compute): what this machine can render with; compute-mc.js fills it from compute/probe.js */ ?>
+<fieldset class="shell-set" data-compute-set>
+  <legend><?= Lang::e('compute.set.title') ?></legend>
+  <p class="shell-hint-text"><strong><?= Lang::e('compute.card.title') ?></strong><br><?= Lang::e('compute.card.lede') ?></p>
+  <div data-compute-card><p class="shell-hint-text"><?= Lang::e('compute.card.wait') ?></p></div>
+  <?php /* 0.7 CU.7: other computers on the network — filled only inside CadCraft Studio, which can find them (lan-ui.js) */ ?>
+  <div data-compute-lan hidden></div>
 </fieldset>
 <?php /* AI assistants and scripts (0.4 part 2 X.7, session agents): host.js fills this with Settings › Assistants (off by default) */ ?>
 <div data-assistants-settings></div>
